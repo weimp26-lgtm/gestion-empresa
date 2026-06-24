@@ -4,25 +4,20 @@ import { collection, onSnapshot } from "firebase/firestore";
 
 function Dashboard() {
   const [ventas, setVentas] = useState([]);
-  const [stock, setStock] = useState([]);
   const [compras, setCompras] = useState([]);
 
   useEffect(() => {
     const unsubVentas = onSnapshot(collection(db, "ventas"), (snap) => {
       setVentas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    const unsubStock = onSnapshot(collection(db, "stock"), (snap) => {
-      setStock(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
     const unsubCompras = onSnapshot(collection(db, "compras"), (snap) => {
       setCompras(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return () => { unsubVentas(); unsubStock(); unsubCompras(); };
+    return () => { unsubVentas(); unsubCompras(); };
   }, []);
 
   const fmt = (n) => "$" + Number(n || 0).toLocaleString("es-AR");
 
-  // Ventas reales — sin estafas
   const ventasReales = ventas.filter(v => !v.estafa);
 
   const totalVentas = ventasReales.reduce((a, v) => a + (v.total || 0), 0);
@@ -31,7 +26,6 @@ function Dashboard() {
   const pendEntrega = ventasReales.filter(v => v.entrega !== "entregado").length;
   const deudaProv = compras.filter(c => c.pago === "pendiente").reduce((a, c) => a + (c.total || 0), 0);
 
-  // Stock calculado desde compras y ventas
   const calcularStock = () => {
     const productos = {};
     compras.forEach((c) => {
@@ -66,13 +60,8 @@ function Dashboard() {
     { label: "Valor en stock", value: fmt(stockVal), color: "#185FA5" },
   ];
 
-  // Solo ventas reales con entrega pendiente
   const pendientesEntrega = ventasReales.filter(v => v.entrega !== "entregado");
-
-  // Solo ventas reales con cobro pendiente
   const pendientesCobro = ventasReales.filter(v => v.pago !== "cobrado");
-
-  // Estafas para mostrar alerta
   const cantEstafas = ventas.filter(v => v.estafa).length;
   const totalEstafas = ventas.filter(v => v.estafa).reduce((a, v) => a + (v.total || 0), 0);
 
