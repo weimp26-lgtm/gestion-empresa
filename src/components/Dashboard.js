@@ -26,44 +26,47 @@ function Dashboard() {
   const pendEntrega = ventasReales.filter(v => v.entrega !== "entregado").length;
   const deudaProv = compras.filter(c => c.pago === "pendiente").reduce((a, c) => a + (c.total || 0), 0);
 
-  // Stock calculado
-  const calcularStock = () => {
+  // Calcular por producto
+  const calcularProductos = () => {
     const productos = {};
+
     compras.forEach((c) => {
       const nombre = c.producto?.trim();
       if (!nombre) return;
-      if (!productos[nombre]) productos[nombre] = { comprado: 0, vendido: 0, costoTotal: 0, ventaTotal: 0 };
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, costoTotal: 0, vendido: 0, ingresoTotal: 0 };
       productos[nombre].comprado += Number(c.cantidad || 0);
       productos[nombre].costoTotal += Number(c.cantidad || 0) * Number(c.costoUnit || 0);
     });
+
     ventasReales.forEach((v) => {
       const nombre = v.producto?.trim();
       if (!nombre) return;
-      if (!productos[nombre]) productos[nombre] = { comprado: 0, vendido: 0, costoTotal: 0, ventaTotal: 0 };
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, costoTotal: 0, vendido: 0, ingresoTotal: 0 };
       productos[nombre].vendido += Number(v.cantidad || 0);
-      productos[nombre].ventaTotal += Number(v.total || 0);
+      productos[nombre].ingresoTotal += Number(v.total || 0);
     });
-    return Object.entries(productos).map(([nombre, d]) => ({
-      nombre,
-      ...d,
-      stockActual: d.comprado - d.vendido,
-      costoUnitario: d.comprado > 0 ? d.costoTotal / d.comprado : 0,
-    }));
+
+    return Object.entries(productos).map(([nombre, d]) => {
+      const costoUnit = d.comprado > 0 ? d.costoTotal / d.comprado : 0;
+      const stockActual = d.comprado - d.vendido;
+      const costoVendido = d.vendido * costoUnit;
+      const ganancia = d.ingresoTotal - costoVendido;
+      const margen = d.ingresoTotal > 0 ? Math.round((ganancia / d.ingresoTotal) * 100) : 0;
+      const precioVentaProm = d.vendido > 0 ? d.ingresoTotal / d.vendido : 0;
+      return { nombre, ...d, costoUnit, stockActual, costoVendido, ganancia, margen, precioVentaProm };
+    });
   };
 
-  const stockCalculado = calcularStock();
-  const stockVal = stockCalculado.reduce((a, s) => a + s.stockActual * s.costoUnitario, 0);
-  const stockCritico = stockCalculado.filter(s => s.stockActual <= 3 && s.stockActual >= 0);
+  const productos = calcularProductos();
 
-  // Margen — solo productos que se vendieron
-  const totalCostoVendido = stockCalculado.reduce((a, s) => {
-    const costoUnit = s.comprado > 0 ? s.costoTotal / s.comprado : 0;
-    return a + (s.vendido * costoUnit);
-  }, 0);
-  const totalVentaVendido = stockCalculado.reduce((a, s) => a + s.ventaTotal, 0);
-  const gananciaReal = totalVentaVendido - totalCostoVendido;
-  const margenReal = totalVentaVendido > 0 ? Math.round((gananciaReal / totalVentaVendido) * 100) : 0;
+  // Totales generales
+  const totalCostoVendido = productos.reduce((a, p) => a + p.costoVendido, 0);
+  const totalIngresoVentas = productos.reduce((a, p) => a + p.ingresoTotal, 0);
+  const gananciaReal = totalIngresoVentas - totalCostoVendido;
+  const margenReal = totalIngresoVentas > 0 ? Math.round((gananciaReal / totalIngresoVentas) * 100) : 0;
+  const totalInvertidoStock = productos.reduce((a, p) => a + (p.stockActual > 0 ? p.stockActual * p.costoUnit : 0), 0);
 
+  const stockCritico = productos.filter(p => p.stockActual <= 3 && p.stockActual >= 0);
   const cantEstafas = ventas.filter(v => v.estafa).length;
   const totalEstafas = ventas.filter(v => v.estafa).reduce((a, v) => a + (v.total || 0), 0);
   const pendientesEntrega = ventasReales.filter(v => v.entrega !== "entregado");
@@ -96,78 +99,85 @@ function Dashboard() {
           <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(deudaProv)}</p>
         </div>
         <div className="metric-card">
-          <p className="metric-label">Valor en stock</p>
-          <p className="metric-value" style={{ color: "#185FA5" }}>{fmt(stockVal)}</p>
+          <p className="metric-label">Invertido en stock actual</p>
+          <p className="metric-value" style={{ color: "#185FA5" }}>{fmt(totalInvertidoStock)}</p>
         </div>
       </div>
 
-      {/* Balance compra vs venta */}
+      {/* Balance real compra vs venta */}
       <div className="card" style={{ borderLeft: "3px solid #1D9E75", marginBottom: "1rem" }}>
-        <h3 className="card-title">Balance compra vs venta</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "1rem" }}>
+        <h3 className="card-title">Balance real — compras vs ventas</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "1rem", marginBottom: "1rem" }}>
           <div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Lo que costó lo vendido</p>
+            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Costo de lo vendido</p>
             <p style={{ fontSize: "18px", fontWeight: 500, color: "#A32D2D" }}>{fmt(totalCostoVendido)}</p>
+            <p style={{ fontSize: "11px", color: "#aaa" }}>Lo que te costó lo que vendiste</p>
           </div>
           <div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Lo que vendiste</p>
-            <p style={{ fontSize: "18px", fontWeight: 500, color: "#185FA5" }}>{fmt(totalVentaVendido)}</p>
+            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Ingreso por ventas</p>
+            <p style={{ fontSize: "18px", fontWeight: 500, color: "#185FA5" }}>{fmt(totalIngresoVentas)}</p>
+            <p style={{ fontSize: "11px", color: "#aaa" }}>Lo que cobraste / vas a cobrar</p>
           </div>
           <div>
             <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Ganancia real</p>
             <p style={{ fontSize: "18px", fontWeight: 500, color: gananciaReal >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(gananciaReal)}</p>
+            <p style={{ fontSize: "11px", color: "#aaa" }}>Ingreso − costo de lo vendido</p>
           </div>
           <div>
             <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Margen sobre ventas</p>
-            <p style={{ fontSize: "28px", fontWeight: 500, color: margenReal >= 20 ? "#1D9E75" : margenReal >= 10 ? "#BA7517" : "#A32D2D" }}>
+            <p style={{ fontSize: "32px", fontWeight: 500, color: margenReal >= 20 ? "#1D9E75" : margenReal >= 10 ? "#BA7517" : "#A32D2D" }}>
               {margenReal}%
             </p>
           </div>
         </div>
 
         {/* Desglose por producto */}
-        {stockCalculado.filter(s => s.vendido > 0).length > 0 && (
-          <>
-            <div style={{ borderTop: "0.5px solid #e0dfd8", marginTop: "1rem", paddingTop: "1rem" }}>
-              <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "10px" }}>Margen por producto</p>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Producto</th>
-                      <th>Unidades vendidas</th>
-                      <th>Costo unit.</th>
-                      <th>Precio venta prom.</th>
-                      <th>Ganancia</th>
-                      <th>Margen %</th>
+        {productos.filter(p => p.vendido > 0).length > 0 && (
+          <div style={{ borderTop: "0.5px solid #e0dfd8", paddingTop: "1rem" }}>
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "10px" }}>Desglose por producto</p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th>Comprado</th>
+                    <th>Vendido</th>
+                    <th>Stock actual</th>
+                    <th>Costo unit.</th>
+                    <th>Precio venta prom.</th>
+                    <th>Costo vendido</th>
+                    <th>Ingreso ventas</th>
+                    <th>Ganancia</th>
+                    <th>Margen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productos.filter(p => p.vendido > 0).map((p, i) => (
+                    <tr key={i}>
+                      <td><strong>{p.nombre}</strong></td>
+                      <td>{p.comprado}</td>
+                      <td>{p.vendido}</td>
+                      <td>
+                        <span className={`badge badge-${p.stockActual <= 3 ? "red" : p.stockActual <= 6 ? "amber" : "green"}`}>
+                          {p.stockActual}
+                        </span>
+                      </td>
+                      <td>{fmt(p.costoUnit)}</td>
+                      <td>{fmt(p.precioVentaProm)}</td>
+                      <td style={{ color: "#A32D2D" }}>{fmt(p.costoVendido)}</td>
+                      <td style={{ color: "#185FA5" }}>{fmt(p.ingresoTotal)}</td>
+                      <td style={{ color: p.ganancia >= 0 ? "#1D9E75" : "#A32D2D", fontWeight: 500 }}>{fmt(p.ganancia)}</td>
+                      <td>
+                        <span style={{ fontWeight: 500, color: p.margen >= 20 ? "#1D9E75" : p.margen >= 10 ? "#BA7517" : "#A32D2D" }}>
+                          {p.margen}%
+                        </span>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {stockCalculado.filter(s => s.vendido > 0).map((s, i) => {
-                      const costoUnit = s.comprado > 0 ? s.costoTotal / s.comprado : 0;
-                      const precioVentaProm = s.vendido > 0 ? s.ventaTotal / s.vendido : 0;
-                      const ganancia = s.ventaTotal - (s.vendido * costoUnit);
-                      const margen = s.ventaTotal > 0 ? Math.round((ganancia / s.ventaTotal) * 100) : 0;
-                      return (
-                        <tr key={i}>
-                          <td><strong>{s.nombre}</strong></td>
-                          <td>{s.vendido}</td>
-                          <td>{fmt(costoUnit)}</td>
-                          <td>{fmt(precioVentaProm)}</td>
-                          <td style={{ color: ganancia >= 0 ? "#1D9E75" : "#A32D2D", fontWeight: 500 }}>{fmt(ganancia)}</td>
-                          <td>
-                            <span style={{ fontWeight: 500, color: margen >= 20 ? "#1D9E75" : margen >= 10 ? "#BA7517" : "#A32D2D" }}>
-                              {margen}%
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </>
+          </div>
         )}
       </div>
 
