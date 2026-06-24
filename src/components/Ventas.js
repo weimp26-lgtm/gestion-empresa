@@ -65,6 +65,23 @@ function Ventas() {
     });
   };
 
+  const manejarDuplicado = (campo, valor) => {
+    const dup = buscarClienteDuplicado(campo, valor);
+    if (!dup) return;
+    const copiar = window.confirm(
+      `⚠️ Este ${campo === "email" ? "email" : campo === "tel" ? "teléfono" : "domicilio"} ya está registrado en la venta de ${dup.cliente} (${dup.fecha}).\n\n¿Querés copiar los datos de ese cliente?\n\nAceptar = Copiar datos del cliente anterior\nCancelar = Continuar con los datos nuevos`
+    );
+    if (copiar) {
+      setForm(f => ({
+        ...f,
+        cliente: dup.cliente || f.cliente,
+        emailCliente: dup.emailCliente || f.emailCliente,
+        telCliente: dup.telCliente || f.telCliente,
+        domicilioCliente: dup.domicilioCliente || f.domicilioCliente,
+      }));
+    }
+  };
+
   const calcularStock = () => {
     const productos = {};
     compras.forEach((c) => {
@@ -290,10 +307,7 @@ function Ventas() {
                   type="email"
                   value={form.emailCliente}
                   onChange={(e) => setForm({ ...form, emailCliente: e.target.value })}
-                  onBlur={(e) => {
-                    const dup = buscarClienteDuplicado("email", e.target.value);
-                    if (dup) alert(`⚠️ Este email ya está registrado en la venta de ${dup.cliente} (${dup.fecha})`);
-                  }}
+                  onBlur={(e) => manejarDuplicado("email", e.target.value)}
                   placeholder="cliente@email.com"
                 />
               </div>
@@ -302,10 +316,7 @@ function Ventas() {
                 <input
                   value={form.telCliente}
                   onChange={(e) => setForm({ ...form, telCliente: e.target.value })}
-                  onBlur={(e) => {
-                    const dup = buscarClienteDuplicado("tel", e.target.value);
-                    if (dup) alert(`⚠️ Este teléfono ya está registrado en la venta de ${dup.cliente} (${dup.fecha})`);
-                  }}
+                  onBlur={(e) => manejarDuplicado("tel", e.target.value)}
                   placeholder="11-1234-5678"
                 />
               </div>
@@ -314,10 +325,7 @@ function Ventas() {
                 <input
                   value={form.domicilioCliente}
                   onChange={(e) => setForm({ ...form, domicilioCliente: e.target.value })}
-                  onBlur={(e) => {
-                    const dup = buscarClienteDuplicado("domicilio", e.target.value);
-                    if (dup) alert(`⚠️ Este domicilio ya está registrado en la venta de ${dup.cliente} (${dup.fecha})`);
-                  }}
+                  onBlur={(e) => manejarDuplicado("domicilio", e.target.value)}
                   placeholder="Calle 123, Ciudad"
                 />
               </div>
