@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, onSnapshot, addDoc } from "firebase/firestore";
+import { collection, onSnapshot, addDoc, updateDoc, doc } from "firebase/firestore";
 
 function Caja() {
   const [ventas, setVentas] = useState([]);
   const [compras, setCompras] = useState([]);
   const [movManuales, setMovManuales] = useState([]);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [editando, setEditando] = useState(null);
   const [filtros, setFiltros] = useState({
     desde: "", hasta: "", tipo: "", medio: "", moneda: "",
   });
@@ -43,15 +44,39 @@ function Caja() {
 
   const guardarMovimiento = async (e) => {
     e.preventDefault();
-    await addDoc(collection(db, "movimientos_caja"), {
-      ...form,
-      monto: Number(form.monto),
-    });
+    const datos = { ...form, monto: Number(form.monto) };
+    if (editando) {
+      await updateDoc(doc(db, "movimientos_caja", editando), datos);
+    } else {
+      await addDoc(collection(db, "movimientos_caja"), datos);
+    }
     setMostrarForm(false);
+    setEditando(null);
     setForm(formVacio);
   };
 
-  // Movimientos de ventas y compras
+  const abrirEditar = (m) => {
+    setEditando(m.id);
+    setForm({
+      tipo: m.tipo,
+      monto: m.monto,
+      moneda: m.moneda,
+      medio: m.medio,
+      responsable: m.responsable,
+      motivo: m.motivo,
+      fecha: m.fecha,
+    });
+    setMostrarForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelar = () => {
+    setMostrarForm(false);
+    setEditando(null);
+    setForm(formVacio);
+  };
+
+  // Movimientos automáticos
   const movAutomaticos = [
     ...ventas.map((v) => ({
       fecha: v.fecha,
@@ -63,7 +88,6 @@ function Caja() {
       estado: v.estafa ? "pendiente/estafa" : v.pago === "cobrado" ? "cobrado" : v.pago,
       responsable: v.vendedor || "—",
       motivo: "Venta",
-      origen: "venta",
     })),
     ...compras.map((c) => ({
       fecha: c.fecha,
@@ -75,16 +99,9 @@ function Caja() {
       estado: c.pago === "pagado" ? "pagado" : "pendiente",
       responsable: "—",
       motivo: "Compra",
-      origen: "compra",
     })),
   ].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
 
-  // Movimientos manuales
-  const movManualesOrdenados = [...movManuales].sort((a, b) =>
-    (b.fecha || "").localeCompare(a.fecha || "")
-  );
-
-  // Filtrar movimientos automáticos
   const movFiltrados = movAutomaticos.filter((m) => {
     if (filtros.desde && m.fecha < filtros.desde) return false;
     if (filtros.hasta && m.fecha > filtros.hasta) return false;
@@ -94,25 +111,29 @@ function Caja() {
     return true;
   });
 
-  // Métricas ARS — ventas y compras
+  // Métricas ventas/compras ARS
   const ingresadosARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const egresadosARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const porCobrarARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const porPagarARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const estafasARS = movFiltrados.filter(m => m.estado === "pendiente/estafa" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
 
-  // Métricas USD — ventas y compras
+  // Métricas ventas/compras USD
   const ingresadosUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const egresadosUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const porCobrarUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const porPagarUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const estafasUSD = movFiltrados.filter(m => m.estado === "pendiente/estafa" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
 
-  // Métricas manuales ARS y USD
+  // Métricas manuales
   const manualIngARS = movManuales.filter(m => m.tipo === "ingreso" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const manualEgrARS = movManuales.filter(m => m.tipo === "egreso" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const manualIngUSD = movManuales.filter(m => m.tipo === "ingreso" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const manualEgrUSD = movManuales.filter(m => m.tipo === "egreso" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+
+  // Balance general
+  const balanceGenARS = (ingresadosARS - egresadosARS) + (manualIngARS - manualEgrARS);
+  const balanceGenUSD = (ingresadosUSD - egresadosUSD) + (manualIngUSD - manualEgrUSD);
 
   const badgeEstado = (estado) => {
     if (estado === "cobrado" || estado === "pagado") return "green";
@@ -124,15 +145,15 @@ function Caja() {
     <div className="section">
       <div className="section-header">
         <h2 className="section-title">Caja</h2>
-        <button className="btn-primary" onClick={() => setMostrarForm(!mostrarForm)}>
+        <button className="btn-primary" onClick={() => { cancelar(); setMostrarForm(!mostrarForm); }}>
           {mostrarForm ? "Cancelar" : "+ Ingreso / Egreso manual"}
         </button>
       </div>
 
-      {/* Formulario movimiento manual */}
+      {/* Formulario */}
       {mostrarForm && (
         <div className="card" style={{ borderLeft: "3px solid #185FA5" }}>
-          <h3 className="card-title">Registrar movimiento manual</h3>
+          <h3 className="card-title">{editando ? "Editar movimiento" : "Registrar movimiento manual"}</h3>
           <form onSubmit={guardarMovimiento}>
             <div className="form-grid">
               <div className="form-group">
@@ -180,21 +201,78 @@ function Caja() {
               {form.tipo === "ingreso" ? "Ingreso" : "Egreso"}: <strong>{fmt(form.monto, form.moneda)}</strong>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
-              <button type="submit" className="btn-primary">Guardar movimiento</button>
-              <button type="button" className="btn-secondary" onClick={() => { setMostrarForm(false); setForm(formVacio); }}>Cancelar</button>
+              <button type="submit" className="btn-primary">{editando ? "Guardar cambios" : "Guardar movimiento"}</button>
+              <button type="button" className="btn-secondary" onClick={cancelar}>Cancelar</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Alertas */}
+      {/* Alerta estafas */}
       {(estafasARS > 0 || estafasUSD > 0) && (
         <div className="alert alert-red">
           🚨 Monto en estafas: {estafasARS > 0 && <strong>{fmt(estafasARS, "ARS")}</strong>} {estafasUSD > 0 && <strong>{fmt(estafasUSD, "USD")}</strong>} — no incluido en los balances
         </div>
       )}
 
-      {/* Métricas ARS ventas/compras */}
+      {/* BALANCE GENERAL */}
+      <div className="card" style={{ borderLeft: "3px solid #1D9E75", marginBottom: "1.5rem" }}>
+        <h3 className="card-title">Balance general de caja</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+          <div>
+            <p style={{ fontSize: "12px", color: "#888", marginBottom: "8px", fontWeight: 500 }}>Pesos (ARS)</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Cobrado en ventas</span>
+                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(ingresadosARS, "ARS")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Pagado en compras</span>
+                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(egresadosARS, "ARS")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Ingresos manuales</span>
+                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(manualIngARS, "ARS")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Egresos manuales</span>
+                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(manualEgrARS, "ARS")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "0.5px solid #e0dfd8", paddingTop: "8px", marginTop: "4px" }}>
+                <span style={{ fontWeight: 500 }}>Balance total ARS</span>
+                <span style={{ fontSize: "18px", fontWeight: 500, color: balanceGenARS >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceGenARS, "ARS")}</span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <p style={{ fontSize: "12px", color: "#888", marginBottom: "8px", fontWeight: 500 }}>Dólares (USD)</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Cobrado en ventas</span>
+                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(ingresadosUSD, "USD")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Pagado en compras</span>
+                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(egresadosUSD, "USD")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Ingresos manuales</span>
+                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(manualIngUSD, "USD")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#888" }}>Egresos manuales</span>
+                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(manualEgrUSD, "USD")}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "0.5px solid #e0dfd8", paddingTop: "8px", marginTop: "4px" }}>
+                <span style={{ fontWeight: 500 }}>Balance total USD</span>
+                <span style={{ fontSize: "18px", fontWeight: 500, color: balanceGenUSD >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceGenUSD, "USD")}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Métricas ARS */}
       <p className="card-title" style={{ marginBottom: "8px" }}>Pesos (ARS) — ventas y compras</p>
       <div className="metrics-grid" style={{ marginBottom: "1rem" }}>
         <div className="metric-card">
@@ -221,7 +299,7 @@ function Caja() {
         </div>
       </div>
 
-      {/* Métricas USD ventas/compras */}
+      {/* Métricas USD */}
       <p className="card-title" style={{ marginBottom: "8px" }}>Dólares (USD) — ventas y compras</p>
       <div className="metrics-grid" style={{ marginBottom: "1.5rem" }}>
         <div className="metric-card">
@@ -247,43 +325,6 @@ function Caja() {
           <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarUSD, "USD")}</p>
         </div>
       </div>
-
-      {/* Movimientos manuales resumen */}
-      {movManuales.length > 0 && (
-        <>
-          <p className="card-title" style={{ marginBottom: "8px" }}>Movimientos manuales</p>
-          <div className="metrics-grid" style={{ marginBottom: "1.5rem" }}>
-            <div className="metric-card">
-              <p className="metric-label">Ingresos manuales ARS</p>
-              <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(manualIngARS, "ARS")}</p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Egresos manuales ARS</p>
-              <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(manualEgrARS, "ARS")}</p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Balance manual ARS</p>
-              <p className="metric-value" style={{ color: manualIngARS - manualEgrARS >= 0 ? "#1D9E75" : "#A32D2D" }}>
-                {fmt(manualIngARS - manualEgrARS, "ARS")}
-              </p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Ingresos manuales USD</p>
-              <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(manualIngUSD, "USD")}</p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Egresos manuales USD</p>
-              <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(manualEgrUSD, "USD")}</p>
-            </div>
-            <div className="metric-card">
-              <p className="metric-label">Balance manual USD</p>
-              <p className="metric-value" style={{ color: manualIngUSD - manualEgrUSD >= 0 ? "#1D9E75" : "#A32D2D" }}>
-                {fmt(manualIngUSD - manualEgrUSD, "USD")}
-              </p>
-            </div>
-          </div>
-        </>
-      )}
 
       {/* Filtros */}
       <div className="card">
@@ -333,7 +374,7 @@ function Caja() {
       {/* Tabla movimientos manuales */}
       <div className="card" style={{ borderLeft: "3px solid #185FA5" }}>
         <h3 className="card-title">Movimientos manuales de caja</h3>
-        {movManualesOrdenados.length === 0 ? (
+        {movManuales.length === 0 ? (
           <p className="empty">Sin movimientos manuales todavía</p>
         ) : (
           <div className="table-wrap">
@@ -341,11 +382,11 @@ function Caja() {
               <thead>
                 <tr>
                   <th>Fecha</th><th>Tipo</th><th>Monto</th><th>Moneda</th>
-                  <th>Medio</th><th>Responsable</th><th>Motivo</th>
+                  <th>Medio</th><th>Responsable</th><th>Motivo</th><th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {movManualesOrdenados.map((m) => (
+                {[...movManuales].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((m) => (
                   <tr key={m.id}>
                     <td>{m.fecha}</td>
                     <td>
@@ -358,6 +399,9 @@ function Caja() {
                     <td>{m.medio}</td>
                     <td>{m.responsable}</td>
                     <td>{m.motivo}</td>
+                    <td>
+                      <button className="btn-xs" onClick={() => abrirEditar(m)}>✏️ Editar</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -374,7 +418,7 @@ function Caja() {
             <thead>
               <tr>
                 <th>Fecha</th><th>Tipo</th><th>Origen</th><th>Concepto</th>
-                <th>Medio</th><th>Moneda</th><th>Monto</th><th>Estado</th>
+                <th>Responsable</th><th>Medio</th><th>Moneda</th><th>Monto</th><th>Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -386,8 +430,9 @@ function Caja() {
                       {m.tipo}
                     </span>
                   </td>
-                  <td><span className="badge badge-gray">{m.motivo}</span></td>
+                  <td><span className="badge badge-blue">{m.motivo}</span></td>
                   <td>{m.concepto}</td>
+                  <td>{m.responsable}</td>
                   <td>{m.medio}</td>
                   <td>
                     <span className={`badge badge-${m.moneda === "USD" ? "blue" : "green"}`}>
