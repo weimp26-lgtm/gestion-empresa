@@ -35,6 +35,8 @@ function Ventas() {
     moneda: "ARS",
     estafa: false,
     notaEstafa: "",
+    precioUSD: "",
+    tipoCambio: "",
   };
 
   const [form, setForm] = useState(formVacio);
@@ -141,6 +143,8 @@ function Ventas() {
       moneda: v.moneda || "ARS",
       estafa: v.estafa || false,
       notaEstafa: v.notaEstafa || "",
+      precioUSD: v.precioUSD || "",
+      tipoCambio: v.tipoCambio || "",
     });
     setMostrarForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -197,6 +201,10 @@ function Ventas() {
     return "red";
   };
 
+  const totalEfectivoARS = form.medio === "Efectivo" && form.precioUSD && form.tipoCambio
+    ? Number(form.precioUSD) * Number(form.cantidad) * Number(form.tipoCambio)
+    : null;
+
   const FilaDetalle = ({ label, value }) => {
     if (!value) return null;
     return (
@@ -225,6 +233,7 @@ function Ventas() {
         </div>
       )}
 
+      {/* Modal detalle */}
       {verDetalle && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
@@ -263,6 +272,13 @@ function Ventas() {
 
             <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Cobro y entrega</p>
             <FilaDetalle label="Medio de pago" value={verDetalle.medio} />
+            {verDetalle.medio === "Efectivo" && verDetalle.precioUSD && verDetalle.tipoCambio && (
+              <>
+                <FilaDetalle label="Precio en USD" value={`USD ${Number(verDetalle.precioUSD).toLocaleString("es-AR")} × ${verDetalle.cantidad}`} />
+                <FilaDetalle label="Tipo de cambio" value={`1 USD = $${Number(verDetalle.tipoCambio).toLocaleString("es-AR")}`} />
+                <FilaDetalle label="Total en efectivo ARS" value={`$${(Number(verDetalle.precioUSD) * Number(verDetalle.cantidad) * Number(verDetalle.tipoCambio)).toLocaleString("es-AR")}`} />
+              </>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
               <span style={{ fontSize: "12px", color: "#888" }}>Estado cobro</span>
               <span className={`badge badge-${badgePago(verDetalle.pago)}`}>{verDetalle.pago}</span>
@@ -291,6 +307,7 @@ function Ventas() {
         </div>
       )}
 
+      {/* Formulario */}
       {mostrarForm && (
         <div className="card">
           <h3 className="card-title">{editando ? "Editar venta" : "Registrar venta"}</h3>
@@ -382,6 +399,30 @@ function Ventas() {
                   <option>Mercado Pago</option>
                 </select>
               </div>
+
+              {form.medio === "Efectivo" && (
+                <>
+                  <div className="form-group">
+                    <label>Precio en USD (opcional)</label>
+                    <input
+                      type="number"
+                      value={form.precioUSD}
+                      onChange={(e) => setForm({ ...form, precioUSD: e.target.value })}
+                      placeholder="Ej: 500"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Tipo de cambio (1 USD = ? ARS)</label>
+                    <input
+                      type="number"
+                      value={form.tipoCambio}
+                      onChange={(e) => setForm({ ...form, tipoCambio: e.target.value })}
+                      placeholder="Ej: 1200"
+                    />
+                  </div>
+                </>
+              )}
+
               <div className="form-group">
                 <label>Estado cobro</label>
                 <select value={form.pago} onChange={(e) => setForm({ ...form, pago: e.target.value })}>
@@ -401,8 +442,24 @@ function Ventas() {
             </div>
 
             <div className="total-preview">
-              Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio), form.moneda)}</strong>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span>Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio), form.moneda)}</strong></span>
+                {form.medio === "Efectivo" && form.precioUSD && form.tipoCambio && (
+                  <>
+                    <span style={{ fontSize: "12px", color: "#888" }}>
+                      Precio USD: <strong style={{ color: "#185FA5" }}>USD {Number(form.precioUSD).toLocaleString("es-AR")} × {form.cantidad} = USD {(Number(form.precioUSD) * Number(form.cantidad)).toLocaleString("es-AR")}</strong>
+                    </span>
+                    <span style={{ fontSize: "12px", color: "#888" }}>
+                      Tipo de cambio: <strong>1 USD = ${Number(form.tipoCambio).toLocaleString("es-AR")}</strong>
+                    </span>
+                    <span style={{ fontSize: "14px", fontWeight: 500, color: "#1D9E75" }}>
+                      Total en efectivo ARS: ${(Number(form.precioUSD) * Number(form.cantidad) * Number(form.tipoCambio)).toLocaleString("es-AR")}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
+
             <div style={{ display: "flex", gap: "8px" }}>
               <button type="submit" className="btn-primary">{editando ? "Guardar cambios" : "Guardar venta"}</button>
               <button type="button" className="btn-secondary" onClick={cancelar}>Cancelar</button>
@@ -411,6 +468,7 @@ function Ventas() {
         </div>
       )}
 
+      {/* Filtros */}
       <div className="card">
         <h3 className="card-title">Filtros</h3>
         <div className="filters">
@@ -473,6 +531,7 @@ function Ventas() {
         </div>
       </div>
 
+      {/* Tabla */}
       <div className="card">
         <div className="table-wrap">
           <table>
@@ -499,7 +558,16 @@ function Ventas() {
                   <td>{v.vendedor || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{v.cantidad}</td>
-                  <td>{fmt(v.total, v.moneda)}</td>
+                  <td>
+                    <div>
+                      <p>{fmt(v.total, v.moneda)}</p>
+                      {v.medio === "Efectivo" && v.precioUSD && v.tipoCambio && (
+                        <p style={{ fontSize: "11px", color: "#185FA5" }}>
+                          USD {Number(v.precioUSD).toLocaleString("es-AR")} × TC {Number(v.tipoCambio).toLocaleString("es-AR")}
+                        </p>
+                      )}
+                    </div>
+                  </td>
                   <td><span className={`badge badge-${v.moneda === "USD" ? "blue" : "green"}`}>{v.moneda || "ARS"}</span></td>
                   <td><span className={`badge badge-${v.entrega === "entregado" ? "green" : v.entrega === "programado" ? "blue" : "amber"}`}>{v.entrega}</span></td>
                   <td><span className={`badge badge-${badgePago(v.pago)}`}>{v.pago}</span></td>
