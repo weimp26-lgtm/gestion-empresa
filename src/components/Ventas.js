@@ -105,6 +105,13 @@ function Ventas() {
 
   const stockDisponible = calcularStock();
 
+  const calcularTotalVenta = (f) => {
+    if (f.medio === "Efectivo" && f.precioUSD && f.tipoCambio) {
+      return Number(f.precioUSD) * Number(f.cantidad) * Number(f.tipoCambio);
+    }
+    return Number(f.cantidad) * Number(f.precio);
+  };
+
   const ventasFiltradas = ventas.filter((v) => {
     if (filtros.desde && v.fecha < filtros.desde) return false;
     if (filtros.hasta && v.fecha > filtros.hasta) return false;
@@ -158,7 +165,7 @@ function Ventas() {
 
   const guardarVenta = async (e) => {
     e.preventDefault();
-    const total = Number(form.cantidad) * Number(form.precio);
+    const total = calcularTotalVenta(form);
     if (!editando) {
       const prodStock = stockDisponible.find((s) => s.nombre === form.producto);
       if (prodStock && Number(form.cantidad) > prodStock.stockActual) {
@@ -166,7 +173,13 @@ function Ventas() {
         return;
       }
     }
-    const datos = { ...form, total, cantidad: Number(form.cantidad), precio: Number(form.precio) };
+    const datos = {
+      ...form,
+      total,
+      cantidad: Number(form.cantidad),
+      precio: Number(form.precio),
+      moneda: "ARS",
+    };
     if (editando) {
       await updateDoc(doc(db, "ventas", editando), datos);
     } else {
@@ -200,8 +213,6 @@ function Ventas() {
     if (pago === "parcial") return "amber";
     return "red";
   };
-
-  
 
   const FilaDetalle = ({ label, value }) => {
     if (!value) return null;
@@ -264,19 +275,21 @@ function Ventas() {
             <FilaDetalle label="Fecha de entrega" value={verDetalle.fechaEntrega || "No especificada"} />
             <FilaDetalle label="Producto" value={verDetalle.producto} />
             <FilaDetalle label="Cantidad" value={verDetalle.cantidad} />
-            <FilaDetalle label="Precio unitario" value={fmt(verDetalle.precio, verDetalle.moneda)} />
-            <FilaDetalle label="Total" value={fmt(verDetalle.total, verDetalle.moneda)} />
-            <FilaDetalle label="Moneda" value={verDetalle.moneda || "ARS"} />
+            {verDetalle.medio === "Efectivo" && verDetalle.precioUSD && verDetalle.tipoCambio ? (
+              <>
+                <FilaDetalle label="Precio en USD" value={`USD ${Number(verDetalle.precioUSD).toLocaleString("es-AR")}`} />
+                <FilaDetalle label="Tipo de cambio" value={`1 USD = $${Number(verDetalle.tipoCambio).toLocaleString("es-AR")}`} />
+                <FilaDetalle label="Total en ARS (efectivo)" value={`$${(Number(verDetalle.precioUSD) * Number(verDetalle.cantidad) * Number(verDetalle.tipoCambio)).toLocaleString("es-AR")}`} />
+              </>
+            ) : (
+              <>
+                <FilaDetalle label="Precio unitario" value={fmt(verDetalle.precio, verDetalle.moneda)} />
+                <FilaDetalle label="Total" value={fmt(verDetalle.total, verDetalle.moneda)} />
+              </>
+            )}
 
             <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Cobro y entrega</p>
             <FilaDetalle label="Medio de pago" value={verDetalle.medio} />
-            {verDetalle.medio === "Efectivo" && verDetalle.precioUSD && verDetalle.tipoCambio && (
-              <>
-                <FilaDetalle label="Precio en USD" value={`USD ${Number(verDetalle.precioUSD).toLocaleString("es-AR")} × ${verDetalle.cantidad}`} />
-                <FilaDetalle label="Tipo de cambio" value={`1 USD = $${Number(verDetalle.tipoCambio).toLocaleString("es-AR")}`} />
-                <FilaDetalle label="Total en efectivo ARS" value={`$${(Number(verDetalle.precioUSD) * Number(verDetalle.cantidad) * Number(verDetalle.tipoCambio)).toLocaleString("es-AR")}`} />
-              </>
-            )}
             <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
               <span style={{ fontSize: "12px", color: "#888" }}>Estado cobro</span>
               <span className={`badge badge-${badgePago(verDetalle.pago)}`}>{verDetalle.pago}</span>
@@ -377,17 +390,6 @@ function Ventas() {
                 <input type="number" min="1" value={form.cantidad} onChange={(e) => setForm({ ...form, cantidad: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Precio unitario</label>
-                <input type="number" value={form.precio} onChange={(e) => setForm({ ...form, precio: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>Moneda</label>
-                <select value={form.moneda} onChange={(e) => setForm({ ...form, moneda: e.target.value })}>
-                  <option value="ARS">Pesos (ARS)</option>
-                  <option value="USD">Dólares (USD)</option>
-                </select>
-              </div>
-              <div className="form-group">
                 <label>Medio de pago</label>
                 <select value={form.medio} onChange={(e) => setForm({ ...form, medio: e.target.value })}>
                   <option>Efectivo</option>
@@ -398,10 +400,10 @@ function Ventas() {
                 </select>
               </div>
 
-              {form.medio === "Efectivo" && (
+              {form.medio === "Efectivo" ? (
                 <>
                   <div className="form-group">
-                    <label>Precio en USD (opcional)</label>
+                    <label>Precio en USD</label>
                     <input
                       type="number"
                       value={form.precioUSD}
@@ -417,6 +419,20 @@ function Ventas() {
                       onChange={(e) => setForm({ ...form, tipoCambio: e.target.value })}
                       placeholder="Ej: 1200"
                     />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label>Precio unitario</label>
+                    <input type="number" value={form.precio} onChange={(e) => setForm({ ...form, precio: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label>Moneda</label>
+                    <select value={form.moneda} onChange={(e) => setForm({ ...form, moneda: e.target.value })}>
+                      <option value="ARS">Pesos (ARS)</option>
+                      <option value="USD">Dólares (USD)</option>
+                    </select>
                   </div>
                 </>
               )}
@@ -441,19 +457,17 @@ function Ventas() {
 
             <div className="total-preview">
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span>Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio), form.moneda)}</strong></span>
-                {form.medio === "Efectivo" && form.precioUSD && form.tipoCambio && (
+                {form.medio === "Efectivo" && form.precioUSD && form.tipoCambio ? (
                   <>
                     <span style={{ fontSize: "12px", color: "#888" }}>
-                      Precio USD: <strong style={{ color: "#185FA5" }}>USD {Number(form.precioUSD).toLocaleString("es-AR")} × {form.cantidad} = USD {(Number(form.precioUSD) * Number(form.cantidad)).toLocaleString("es-AR")}</strong>
+                      USD {Number(form.precioUSD).toLocaleString("es-AR")} × {form.cantidad} unidades × TC ${Number(form.tipoCambio).toLocaleString("es-AR")}
                     </span>
-                    <span style={{ fontSize: "12px", color: "#888" }}>
-                      Tipo de cambio: <strong>1 USD = ${Number(form.tipoCambio).toLocaleString("es-AR")}</strong>
-                    </span>
-                    <span style={{ fontSize: "14px", fontWeight: 500, color: "#1D9E75" }}>
-                      Total en efectivo ARS: ${(Number(form.precioUSD) * Number(form.cantidad) * Number(form.tipoCambio)).toLocaleString("es-AR")}
-                    </span>
+                    <span>Total a cobrar en efectivo: <strong style={{ color: "#1D9E75", fontSize: "16px" }}>
+                      ${(Number(form.precioUSD) * Number(form.cantidad) * Number(form.tipoCambio)).toLocaleString("es-AR")} ARS
+                    </strong></span>
                   </>
+                ) : (
+                  <span>Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio), form.moneda)}</strong></span>
                 )}
               </div>
             </div>
@@ -537,7 +551,7 @@ function Ventas() {
               <tr>
                 <th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
                 <th>Teléfono</th><th>Vendedor</th><th>Producto</th><th>Cant.</th>
-                <th>Total</th><th>Moneda</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
+                <th>Total ARS</th><th>Detalle precio</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -556,17 +570,16 @@ function Ventas() {
                   <td>{v.vendedor || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{v.cantidad}</td>
+                  <td><strong>${Number(v.total || 0).toLocaleString("es-AR")}</strong></td>
                   <td>
-                    <div>
-                      <p>{fmt(v.total, v.moneda)}</p>
-                      {v.medio === "Efectivo" && v.precioUSD && v.tipoCambio && (
-                        <p style={{ fontSize: "11px", color: "#185FA5" }}>
-                          USD {Number(v.precioUSD).toLocaleString("es-AR")} × TC {Number(v.tipoCambio).toLocaleString("es-AR")}
-                        </p>
-                      )}
-                    </div>
+                    {v.medio === "Efectivo" && v.precioUSD && v.tipoCambio ? (
+                      <span style={{ fontSize: "11px", color: "#185FA5" }}>
+                        USD {Number(v.precioUSD).toLocaleString("es-AR")} × TC {Number(v.tipoCambio).toLocaleString("es-AR")}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "11px", color: "#888" }}>—</span>
+                    )}
                   </td>
-                  <td><span className={`badge badge-${v.moneda === "USD" ? "blue" : "green"}`}>{v.moneda || "ARS"}</span></td>
                   <td><span className={`badge badge-${v.entrega === "entregado" ? "green" : v.entrega === "programado" ? "blue" : "amber"}`}>{v.entrega}</span></td>
                   <td><span className={`badge badge-${badgePago(v.pago)}`}>{v.pago}</span></td>
                   <td>{v.medio}</td>
@@ -591,10 +604,10 @@ function Ventas() {
           </table>
         </div>
         <div className="table-footer">
-          <span>Total (sin estafas): <strong>{fmt(totalFiltrado, "ARS")}</strong></span>
-          <span>Cobrado: <strong style={{ color: "#1D9E75" }}>{fmt(cobradoFiltrado, "ARS")}</strong></span>
-          <span>Pendiente: <strong style={{ color: "#BA7517" }}>{fmt(totalFiltrado - cobradoFiltrado, "ARS")}</strong></span>
-          {cantEstafas > 0 && <span>En estafas: <strong style={{ color: "#A32D2D" }}>{fmt(totalEstafas, "ARS")}</strong></span>}
+          <span>Total (sin estafas): <strong>${Number(totalFiltrado).toLocaleString("es-AR")} ARS</strong></span>
+          <span>Cobrado: <strong style={{ color: "#1D9E75" }}>${Number(cobradoFiltrado).toLocaleString("es-AR")} ARS</strong></span>
+          <span>Pendiente: <strong style={{ color: "#BA7517" }}>${Number(totalFiltrado - cobradoFiltrado).toLocaleString("es-AR")} ARS</strong></span>
+          {cantEstafas > 0 && <span>En estafas: <strong style={{ color: "#A32D2D" }}>${Number(totalEstafas).toLocaleString("es-AR")} ARS</strong></span>}
         </div>
       </div>
     </div>
