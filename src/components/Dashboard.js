@@ -22,13 +22,40 @@ function Dashboard() {
 
   const fmt = (n) => "$" + Number(n || 0).toLocaleString("es-AR");
 
-  const totalVentas = ventas.reduce((a, v) => a + (v.total || 0), 0);
-  const cobrado = ventas.filter((v) => v.pago === "pagado").reduce((a, v) => a + (v.total || 0), 0);
-  const pendCobro = ventas.filter((v) => v.pago !== "pagado").reduce((a, v) => a + (v.total || 0), 0);
-  const pendEntrega = ventas.filter((v) => v.entrega !== "entregado").length;
-  const deudaProv = compras.filter((c) => c.pago === "pendiente").reduce((a, c) => a + (c.total || 0), 0);
-  const stockVal = stock.reduce((a, s) => a + (s.qty || 0) * (s.costo || 0), 0);
-  const stockCritico = stock.filter((s) => s.qty <= (s.minAlert || 3));
+  // Ventas reales — sin estafas
+  const ventasReales = ventas.filter(v => !v.estafa);
+
+  const totalVentas = ventasReales.reduce((a, v) => a + (v.total || 0), 0);
+  const cobrado = ventasReales.filter(v => v.pago === "cobrado").reduce((a, v) => a + (v.total || 0), 0);
+  const pendCobro = ventasReales.filter(v => v.pago !== "cobrado").reduce((a, v) => a + (v.total || 0), 0);
+  const pendEntrega = ventasReales.filter(v => v.entrega !== "entregado").length;
+  const deudaProv = compras.filter(c => c.pago === "pendiente").reduce((a, c) => a + (c.total || 0), 0);
+
+  // Stock calculado desde compras y ventas
+  const calcularStock = () => {
+    const productos = {};
+    compras.forEach((c) => {
+      const nombre = c.producto?.trim();
+      if (!nombre) return;
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, vendido: 0, costo: 0 };
+      productos[nombre].comprado += Number(c.cantidad || 0);
+      productos[nombre].costo = Number(c.costoUnit || 0);
+    });
+    ventas.forEach((v) => {
+      const nombre = v.producto?.trim();
+      if (!nombre) return;
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, vendido: 0, costo: 0 };
+      productos[nombre].vendido += Number(v.cantidad || 0);
+    });
+    return Object.values(productos).map(p => ({
+      ...p,
+      stockActual: p.comprado - p.vendido,
+    }));
+  };
+
+  const stockCalculado = calcularStock();
+  const stockVal = stockCalculado.reduce((a, s) => a + s.stockActual * s.costo, 0);
+  const stockCritico = stockCalculado.filter(s => s.stockActual <= 3);
 
   const metrics = [
     { label: "Ventas totales", value: fmt(totalVentas), color: "#185FA5" },
@@ -39,8 +66,15 @@ function Dashboard() {
     { label: "Valor en stock", value: fmt(stockVal), color: "#185FA5" },
   ];
 
-  const pendientesEntrega = ventas.filter((v) => v.entrega !== "entregado");
-  const pendientesCobro = ventas.filter((v) => v.pago !== "pagado");
+  // Solo ventas reales con entrega pendiente
+  const pendientesEntrega = ventasReales.filter(v => v.entrega !== "entregado");
+
+  // Solo ventas reales con cobro pendiente
+  const pendientesCobro = ventasReales.filter(v => v.pago !== "cobrado");
+
+  // Estafas para mostrar alerta
+  const cantEstafas = ventas.filter(v => v.estafa).length;
+  const totalEstafas = ventas.filter(v => v.estafa).reduce((a, v) => a + (v.total || 0), 0);
 
   return (
     <div className="section">
@@ -57,13 +91,19 @@ function Dashboard() {
 
       {stockCritico.length > 0 && (
         <div className="alert alert-red">
-          ⚠️ Stock crítico: {stockCritico.map((s) => s.nombre).join(", ")}
+          ⚠️ Stock crítico: {stockCritico.map(s => s.nombre).join(", ")}
         </div>
       )}
 
       {deudaProv > 0 && (
         <div className="alert alert-amber">
           ⚠️ Deuda con proveedores: {fmt(deudaProv)}
+        </div>
+      )}
+
+      {cantEstafas > 0 && (
+        <div className="alert alert-red">
+          🚨 {cantEstafas} venta(s) marcada(s) como estafa — {fmt(totalEstafas)} en riesgo (no incluidas en los totales)
         </div>
       )}
 
@@ -78,6 +118,7 @@ function Dashboard() {
                 <div>
                   <p className="item-main">{v.cliente}</p>
                   <p className="item-sub">{v.producto} × {v.cantidad}</p>
+                  {v.fechaEntrega && <p className="item-sub">Entrega: {v.fechaEntrega}</p>}
                 </div>
                 <span className={`badge badge-${v.entrega === "programado" ? "blue" : "amber"}`}>
                   {v.entrega}
@@ -115,17 +156,19 @@ function Dashboard() {
               <tr>
                 <th>Fecha</th>
                 <th>Cliente</th>
+                <th>Vendedor</th>
                 <th>Producto</th>
                 <th>Total</th>
                 <th>Entrega</th>
-                <th>Pago</th>
+                <th>Cobro</th>
               </tr>
             </thead>
             <tbody>
-              {[...ventas].reverse().slice(0, 5).map((v) => (
+              {[...ventasReales].reverse().slice(0, 5).map((v) => (
                 <tr key={v.id}>
                   <td>{v.fecha}</td>
                   <td>{v.cliente}</td>
+                  <td>{v.vendedor || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{fmt(v.total)}</td>
                   <td>
@@ -134,7 +177,7 @@ function Dashboard() {
                     </span>
                   </td>
                   <td>
-                    <span className={`badge badge-${v.pago === "pagado" ? "green" : v.pago === "parcial" ? "amber" : "red"}`}>
+                    <span className={`badge badge-${v.pago === "cobrado" ? "green" : v.pago === "parcial" ? "amber" : "red"}`}>
                       {v.pago}
                     </span>
                   </td>
