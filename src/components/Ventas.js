@@ -53,6 +53,17 @@ function Ventas() {
     return simbolo + Number(n || 0).toLocaleString("es-AR");
   };
 
+  const buscarClienteDuplicado = (campo, valor) => {
+    if (!valor || valor.trim() === "") return null;
+    return ventas.find((v) => {
+      if (v.id === editando) return false;
+      if (campo === "email") return v.emailCliente?.toLowerCase() === valor.toLowerCase();
+      if (campo === "tel") return v.telCliente?.trim() === valor.trim();
+      if (campo === "domicilio") return v.domicilioCliente?.toLowerCase() === valor.toLowerCase();
+      return false;
+    });
+  };
+
   const calcularStock = () => {
     const productos = {};
     compras.forEach((c) => {
@@ -268,15 +279,40 @@ function Ventas() {
               </div>
               <div className="form-group">
                 <label>Email (opcional)</label>
-                <input type="email" value={form.emailCliente} onChange={(e) => setForm({ ...form, emailCliente: e.target.value })} placeholder="cliente@email.com" />
+                <input
+                  type="email"
+                  value={form.emailCliente}
+                  onChange={(e) => setForm({ ...form, emailCliente: e.target.value })}
+                  onBlur={(e) => {
+                    const dup = buscarClienteDuplicado("email", e.target.value);
+                    if (dup) alert(`⚠️ Este email ya está registrado en la venta de ${dup.cliente} (${dup.fecha})`);
+                  }}
+                  placeholder="cliente@email.com"
+                />
               </div>
               <div className="form-group">
                 <label>Teléfono (opcional)</label>
-                <input value={form.telCliente} onChange={(e) => setForm({ ...form, telCliente: e.target.value })} placeholder="11-1234-5678" />
+                <input
+                  value={form.telCliente}
+                  onChange={(e) => setForm({ ...form, telCliente: e.target.value })}
+                  onBlur={(e) => {
+                    const dup = buscarClienteDuplicado("tel", e.target.value);
+                    if (dup) alert(`⚠️ Este teléfono ya está registrado en la venta de ${dup.cliente} (${dup.fecha})`);
+                  }}
+                  placeholder="11-1234-5678"
+                />
               </div>
               <div className="form-group">
                 <label>Domicilio (opcional)</label>
-                <input value={form.domicilioCliente} onChange={(e) => setForm({ ...form, domicilioCliente: e.target.value })} placeholder="Calle 123, Ciudad" />
+                <input
+                  value={form.domicilioCliente}
+                  onChange={(e) => setForm({ ...form, domicilioCliente: e.target.value })}
+                  onBlur={(e) => {
+                    const dup = buscarClienteDuplicado("domicilio", e.target.value);
+                    if (dup) alert(`⚠️ Este domicilio ya está registrado en la venta de ${dup.cliente} (${dup.fecha})`);
+                  }}
+                  placeholder="Calle 123, Ciudad"
+                />
               </div>
             </div>
 
