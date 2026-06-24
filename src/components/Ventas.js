@@ -125,8 +125,10 @@ function Ventas() {
     return true;
   });
 
-  const totalFiltrado = ventasFiltradas.filter(v => !v.estafa).reduce((a, v) => a + (v.total || 0), 0);
-  const cobradoFiltrado = ventasFiltradas.filter(v => !v.estafa && v.pago === "cobrado").reduce((a, v) => a + (v.total || 0), 0);
+  const totalFiltradoARS = ventasFiltradas.filter(v => !v.estafa && v.moneda !== "USD").reduce((a, v) => a + (v.total || 0), 0);
+  const totalFiltradoUSD = ventasFiltradas.filter(v => !v.estafa && v.moneda === "USD").reduce((a, v) => a + (v.total || 0), 0);
+  const cobradoARS = ventasFiltradas.filter(v => !v.estafa && v.pago === "cobrado" && v.moneda !== "USD").reduce((a, v) => a + (v.total || 0), 0);
+  const cobradoUSD = ventasFiltradas.filter(v => !v.estafa && v.pago === "cobrado" && v.moneda === "USD").reduce((a, v) => a + (v.total || 0), 0);
   const totalEstafas = ventas.filter(v => v.estafa).reduce((a, v) => a + (v.total || 0), 0);
   const cantEstafas = ventas.filter(v => v.estafa).length;
 
@@ -173,12 +175,13 @@ function Ventas() {
         return;
       }
     }
+    const monedaFinal = (form.medio === "Efectivo" && form.precioUSD && form.tipoCambio) ? "ARS" : form.moneda;
     const datos = {
       ...form,
       total,
       cantidad: Number(form.cantidad),
       precio: Number(form.precio),
-      moneda: "ARS",
+      moneda: monedaFinal,
     };
     if (editando) {
       await updateDoc(doc(db, "ventas", editando), datos);
@@ -420,6 +423,12 @@ function Ventas() {
                       placeholder="Ej: 1200"
                     />
                   </div>
+                  {!form.precioUSD && (
+                    <div className="form-group">
+                      <label>Precio en ARS</label>
+                      <input type="number" value={form.precio} onChange={(e) => setForm({ ...form, precio: e.target.value })} placeholder="0" />
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -460,7 +469,7 @@ function Ventas() {
                 {form.medio === "Efectivo" && form.precioUSD && form.tipoCambio ? (
                   <>
                     <span style={{ fontSize: "12px", color: "#888" }}>
-                      USD {Number(form.precioUSD).toLocaleString("es-AR")} × {form.cantidad} unidades × TC ${Number(form.tipoCambio).toLocaleString("es-AR")}
+                      USD {Number(form.precioUSD).toLocaleString("es-AR")} × {form.cantidad} uds × TC ${Number(form.tipoCambio).toLocaleString("es-AR")}
                     </span>
                     <span>Total a cobrar en efectivo: <strong style={{ color: "#1D9E75", fontSize: "16px" }}>
                       ${(Number(form.precioUSD) * Number(form.cantidad) * Number(form.tipoCambio)).toLocaleString("es-AR")} ARS
@@ -551,7 +560,7 @@ function Ventas() {
               <tr>
                 <th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
                 <th>Teléfono</th><th>Vendedor</th><th>Producto</th><th>Cant.</th>
-                <th>Total ARS</th><th>Detalle precio</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
+                <th>Total</th><th>Moneda</th><th>Detalle precio</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -570,7 +579,8 @@ function Ventas() {
                   <td>{v.vendedor || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{v.cantidad}</td>
-                  <td><strong>${Number(v.total || 0).toLocaleString("es-AR")}</strong></td>
+                  <td><strong>{fmt(v.total, v.moneda)}</strong></td>
+                  <td><span className={`badge badge-${v.moneda === "USD" ? "blue" : "green"}`}>{v.moneda || "ARS"}</span></td>
                   <td>
                     {v.medio === "Efectivo" && v.precioUSD && v.tipoCambio ? (
                       <span style={{ fontSize: "11px", color: "#185FA5" }}>
@@ -604,10 +614,11 @@ function Ventas() {
           </table>
         </div>
         <div className="table-footer">
-          <span>Total (sin estafas): <strong>${Number(totalFiltrado).toLocaleString("es-AR")} ARS</strong></span>
-          <span>Cobrado: <strong style={{ color: "#1D9E75" }}>${Number(cobradoFiltrado).toLocaleString("es-AR")} ARS</strong></span>
-          <span>Pendiente: <strong style={{ color: "#BA7517" }}>${Number(totalFiltrado - cobradoFiltrado).toLocaleString("es-AR")} ARS</strong></span>
-          {cantEstafas > 0 && <span>En estafas: <strong style={{ color: "#A32D2D" }}>${Number(totalEstafas).toLocaleString("es-AR")} ARS</strong></span>}
+          <span>Total ARS: <strong>${Number(totalFiltradoARS).toLocaleString("es-AR")}</strong></span>
+          <span>Cobrado ARS: <strong style={{ color: "#1D9E75" }}>${Number(cobradoARS).toLocaleString("es-AR")}</strong></span>
+          <span>Total USD: <strong>USD {Number(totalFiltradoUSD).toLocaleString("es-AR")}</strong></span>
+          <span>Cobrado USD: <strong style={{ color: "#1D9E75" }}>USD {Number(cobradoUSD).toLocaleString("es-AR")}</strong></span>
+          {cantEstafas > 0 && <span>En estafas: <strong style={{ color: "#A32D2D" }}>{fmt(totalEstafas, "ARS")}</strong></span>}
         </div>
       </div>
     </div>
