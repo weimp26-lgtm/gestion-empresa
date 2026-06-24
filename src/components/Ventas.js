@@ -15,7 +15,7 @@ function Ventas() {
   const [editando, setEditando] = useState(null);
   const [verDetalle, setVerDetalle] = useState(null);
   const [filtros, setFiltros] = useState({
-    desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "",
+    desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "",
   });
 
   const formVacio = {
@@ -24,11 +24,12 @@ function Ventas() {
     emailCliente: "",
     telCliente: "",
     domicilioCliente: "",
+    vendedor: "",
     producto: "",
     cantidad: 1,
     precio: 0,
     medio: "Efectivo",
-    pago: "pagado",
+    pago: "cobrado",
     entrega: "entregado",
     fechaEntrega: "",
     moneda: "ARS",
@@ -94,11 +95,12 @@ function Ventas() {
     if (filtros.medio && v.medio !== filtros.medio) return false;
     if (filtros.estafa === "si" && !v.estafa) return false;
     if (filtros.estafa === "no" && v.estafa) return false;
+    if (filtros.vendedor && !v.vendedor?.toLowerCase().includes(filtros.vendedor.toLowerCase())) return false;
     return true;
   });
 
   const totalFiltrado = ventasFiltradas.filter(v => !v.estafa).reduce((a, v) => a + (v.total || 0), 0);
-  const cobradoFiltrado = ventasFiltradas.filter(v => !v.estafa && v.pago === "pagado").reduce((a, v) => a + (v.total || 0), 0);
+  const cobradoFiltrado = ventasFiltradas.filter(v => !v.estafa && v.pago === "cobrado").reduce((a, v) => a + (v.total || 0), 0);
   const totalEstafas = ventas.filter(v => v.estafa).reduce((a, v) => a + (v.total || 0), 0);
   const cantEstafas = ventas.filter(v => v.estafa).length;
 
@@ -111,11 +113,12 @@ function Ventas() {
       emailCliente: v.emailCliente || "",
       telCliente: v.telCliente || "",
       domicilioCliente: v.domicilioCliente || "",
+      vendedor: v.vendedor || "",
       producto: v.producto || "",
       cantidad: v.cantidad || 1,
       precio: v.precio || 0,
       medio: v.medio || "Efectivo",
-      pago: v.pago || "pagado",
+      pago: v.pago || "cobrado",
       entrega: v.entrega || "entregado",
       fechaEntrega: v.fechaEntrega || "",
       moneda: v.moneda || "ARS",
@@ -155,8 +158,8 @@ function Ventas() {
     await updateDoc(doc(db, "ventas", id), { entrega: "entregado" });
   };
 
-  const marcarPagado = async (id) => {
-    await updateDoc(doc(db, "ventas", id), { pago: "pagado" });
+  const marcarCobrado = async (id) => {
+    await updateDoc(doc(db, "ventas", id), { pago: "cobrado" });
   };
 
   const marcarEstafa = async (v) => {
@@ -169,6 +172,12 @@ function Ventas() {
       if (nota === null) return;
       await updateDoc(doc(db, "ventas", v.id), { estafa: true, notaEstafa: nota, pago: "pendiente" });
     }
+  };
+
+  const badgePago = (pago) => {
+    if (pago === "cobrado") return "green";
+    if (pago === "parcial") return "amber";
+    return "red";
   };
 
   const FilaDetalle = ({ label, value }) => {
@@ -190,7 +199,6 @@ function Ventas() {
         </button>
       </div>
 
-      {/* Alerta estafas */}
       {cantEstafas > 0 && (
         <div className="alert alert-red" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span>🚨 {cantEstafas} venta(s) marcada(s) como estafa — {fmt(totalEstafas, "ARS")} en riesgo</span>
@@ -200,7 +208,6 @@ function Ventas() {
         </div>
       )}
 
-      {/* Modal detalle */}
       {verDetalle && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
@@ -228,6 +235,7 @@ function Ventas() {
             <FilaDetalle label="Domicilio" value={verDetalle.domicilioCliente} />
 
             <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Venta</p>
+            <FilaDetalle label="Vendedor" value={verDetalle.vendedor} />
             <FilaDetalle label="Fecha de venta" value={verDetalle.fecha} />
             <FilaDetalle label="Fecha de entrega" value={verDetalle.fechaEntrega || "No especificada"} />
             <FilaDetalle label="Producto" value={verDetalle.producto} />
@@ -236,11 +244,11 @@ function Ventas() {
             <FilaDetalle label="Total" value={fmt(verDetalle.total, verDetalle.moneda)} />
             <FilaDetalle label="Moneda" value={verDetalle.moneda || "ARS"} />
 
-            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Pago y entrega</p>
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Cobro y entrega</p>
             <FilaDetalle label="Medio de pago" value={verDetalle.medio} />
             <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
-              <span style={{ fontSize: "12px", color: "#888" }}>Estado pago</span>
-              <span className={`badge badge-${verDetalle.pago === "pagado" ? "green" : verDetalle.pago === "parcial" ? "amber" : "red"}`}>{verDetalle.pago}</span>
+              <span style={{ fontSize: "12px", color: "#888" }}>Estado cobro</span>
+              <span className={`badge badge-${badgePago(verDetalle.pago)}`}>{verDetalle.pago}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
               <span style={{ fontSize: "12px", color: "#888" }}>Estado entrega</span>
@@ -266,7 +274,6 @@ function Ventas() {
         </div>
       )}
 
-      {/* Formulario */}
       {mostrarForm && (
         <div className="card">
           <h3 className="card-title">{editando ? "Editar venta" : "Registrar venta"}</h3>
@@ -319,6 +326,10 @@ function Ventas() {
             <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Datos de la venta</p>
             <div className="form-grid">
               <div className="form-group">
+                <label>Vendedor</label>
+                <input value={form.vendedor} onChange={(e) => setForm({ ...form, vendedor: e.target.value })} placeholder="Nombre del vendedor" required />
+              </div>
+              <div className="form-group">
                 <label>Fecha de venta</label>
                 <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} required />
               </div>
@@ -364,9 +375,9 @@ function Ventas() {
                 </select>
               </div>
               <div className="form-group">
-                <label>Estado pago</label>
+                <label>Estado cobro</label>
                 <select value={form.pago} onChange={(e) => setForm({ ...form, pago: e.target.value })}>
-                  <option value="pagado">Pagado</option>
+                  <option value="cobrado">Cobrado</option>
                   <option value="pendiente">Pendiente</option>
                   <option value="parcial">Parcial</option>
                 </select>
@@ -392,7 +403,6 @@ function Ventas() {
         </div>
       )}
 
-      {/* Filtros */}
       <div className="card">
         <h3 className="card-title">Filtros</h3>
         <div className="filters">
@@ -409,10 +419,14 @@ function Ventas() {
             <input placeholder="Buscar..." value={filtros.cliente} onChange={(e) => setFiltros({ ...filtros, cliente: e.target.value })} />
           </div>
           <div className="form-group">
-            <label>Pago</label>
+            <label>Vendedor</label>
+            <input placeholder="Buscar..." value={filtros.vendedor} onChange={(e) => setFiltros({ ...filtros, vendedor: e.target.value })} />
+          </div>
+          <div className="form-group">
+            <label>Cobro</label>
             <select value={filtros.pago} onChange={(e) => setFiltros({ ...filtros, pago: e.target.value })}>
               <option value="">Todos</option>
-              <option value="pagado">Pagado</option>
+              <option value="cobrado">Cobrado</option>
               <option value="pendiente">Pendiente</option>
               <option value="parcial">Parcial</option>
             </select>
@@ -445,21 +459,20 @@ function Ventas() {
               <option value="si">Solo estafas</option>
             </select>
           </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "" })}>
+          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "" })}>
             Limpiar
           </button>
         </div>
       </div>
 
-      {/* Tabla */}
       <div className="card">
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
                 <th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
-                <th>Teléfono</th><th>Producto</th><th>Cant.</th>
-                <th>Total</th><th>Moneda</th><th>Entrega</th><th>Pago</th><th>Medio</th><th>Acciones</th>
+                <th>Teléfono</th><th>Vendedor</th><th>Producto</th><th>Cant.</th>
+                <th>Total</th><th>Moneda</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -475,12 +488,13 @@ function Ventas() {
                     </div>
                   </td>
                   <td>{v.telCliente || "—"}</td>
+                  <td>{v.vendedor || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{v.cantidad}</td>
                   <td>{fmt(v.total, v.moneda)}</td>
                   <td><span className={`badge badge-${v.moneda === "USD" ? "blue" : "green"}`}>{v.moneda || "ARS"}</span></td>
                   <td><span className={`badge badge-${v.entrega === "entregado" ? "green" : v.entrega === "programado" ? "blue" : "amber"}`}>{v.entrega}</span></td>
-                  <td><span className={`badge badge-${v.pago === "pagado" ? "green" : v.pago === "parcial" ? "amber" : "red"}`}>{v.pago}</span></td>
+                  <td><span className={`badge badge-${badgePago(v.pago)}`}>{v.pago}</span></td>
                   <td>{v.medio}</td>
                   <td>
                     <div className="action-btns">
@@ -494,7 +508,7 @@ function Ventas() {
                         {v.estafa ? "✓ Quitar" : "🚨 Estafa"}
                       </button>
                       {v.entrega !== "entregado" && !v.estafa && <button className="btn-xs" onClick={() => marcarEntregado(v.id)}>✓ Entregado</button>}
-                      {v.pago !== "pagado" && !v.estafa && <button className="btn-xs" onClick={() => marcarPagado(v.id)}>✓ Pagado</button>}
+                      {v.pago !== "cobrado" && !v.estafa && <button className="btn-xs" onClick={() => marcarCobrado(v.id)}>✓ Cobrado</button>}
                     </div>
                   </td>
                 </tr>
