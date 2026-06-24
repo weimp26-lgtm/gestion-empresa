@@ -32,7 +32,7 @@ function Caja() {
       medio: v.medio || "—",
       monto: v.total || 0,
       moneda: v.moneda || "ARS",
-      estado: v.pago === "pagado" ? "cobrado" : v.pago,
+      estado: v.estafa ? "pendiente/estafa" : v.pago === "pagado" ? "cobrado" : v.pago,
     })),
     ...compras.map((c) => ({
       fecha: c.fecha,
@@ -54,30 +54,46 @@ function Caja() {
     return true;
   });
 
-  // Métricas ARS
+  // Métricas ARS — excluye estafas
   const ingresadosARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const egresadosARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const porCobrarARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado !== "cobrado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
+  const porCobrarARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
   const porPagarARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
+  const estafasARS = movFiltrados.filter(m => m.estado === "pendiente/estafa" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
 
-  // Métricas USD
+  // Métricas USD — excluye estafas
   const ingresadosUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const egresadosUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
-  const porCobrarUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado !== "cobrado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const porCobrarUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
   const porPagarUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const estafasUSD = movFiltrados.filter(m => m.estado === "pendiente/estafa" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
 
   // Desglose por medio de pago
   const medios = {};
   movFiltrados.forEach((m) => {
+    if (m.estado === "pendiente/estafa") return;
     const key = `${m.medio}___${m.moneda}`;
     if (!medios[key]) medios[key] = { medio: m.medio, moneda: m.moneda, ingresado: 0, egresado: 0 };
     if (m.tipo === "ingreso" && m.estado === "cobrado") medios[key].ingresado += m.monto;
     if (m.tipo === "egreso" && m.estado === "pagado") medios[key].egresado += m.monto;
   });
 
+  const badgeEstado = (estado) => {
+    if (estado === "cobrado" || estado === "pagado") return "green";
+    if (estado === "pendiente/estafa") return "red";
+    return "amber";
+  };
+
   return (
     <div className="section">
       <h2 className="section-title">Caja</h2>
+
+      {/* Alerta estafas */}
+      {(estafasARS > 0 || estafasUSD > 0) && (
+        <div className="alert alert-red">
+          🚨 Monto en estafas: {estafasARS > 0 && <strong>{fmt(estafasARS, "ARS")}</strong>} {estafasUSD > 0 && <strong>{fmt(estafasUSD, "USD")}</strong>} — no incluido en los balances
+        </div>
+      )}
 
       {/* Métricas ARS */}
       <p className="card-title" style={{ marginBottom: "8px" }}>Pesos (ARS)</p>
@@ -104,6 +120,12 @@ function Caja() {
           <p className="metric-label">Por pagar</p>
           <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarARS, "ARS")}</p>
         </div>
+        {estafasARS > 0 && (
+          <div className="metric-card">
+            <p className="metric-label">En estafas</p>
+            <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(estafasARS, "ARS")}</p>
+          </div>
+        )}
       </div>
 
       {/* Métricas USD */}
@@ -131,6 +153,12 @@ function Caja() {
           <p className="metric-label">Por pagar</p>
           <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarUSD, "USD")}</p>
         </div>
+        {estafasUSD > 0 && (
+          <div className="metric-card">
+            <p className="metric-label">En estafas</p>
+            <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(estafasUSD, "USD")}</p>
+          </div>
+        )}
       </div>
 
       {/* Filtros */}
@@ -208,7 +236,7 @@ function Caja() {
             </thead>
             <tbody>
               {movFiltrados.map((m, i) => (
-                <tr key={i}>
+                <tr key={i} style={m.estado === "pendiente/estafa" ? { background: "#FFF5F5" } : {}}>
                   <td>{m.fecha}</td>
                   <td>
                     <span className={`badge badge-${m.tipo === "ingreso" ? "green" : "red"}`}>
@@ -224,7 +252,7 @@ function Caja() {
                   </td>
                   <td>{fmt(m.monto, m.moneda)}</td>
                   <td>
-                    <span className={`badge badge-${m.estado === "cobrado" || m.estado === "pagado" ? "green" : "amber"}`}>
+                    <span className={`badge badge-${badgeEstado(m.estado)}`}>
                       {m.estado}
                     </span>
                   </td>
