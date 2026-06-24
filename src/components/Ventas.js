@@ -201,9 +201,7 @@ function Ventas() {
     return "red";
   };
 
-  const totalEfectivoARS = form.medio === "Efectivo" && form.precioUSD && form.tipoCambio
-    ? Number(form.precioUSD) * Number(form.cantidad) * Number(form.tipoCambio)
-    : null;
+  
 
   const FilaDetalle = ({ label, value }) => {
     if (!value) return null;
