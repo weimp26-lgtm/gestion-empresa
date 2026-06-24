@@ -6,7 +6,7 @@ function Caja() {
   const [ventas, setVentas] = useState([]);
   const [compras, setCompras] = useState([]);
   const [filtros, setFiltros] = useState({
-    desde: "", hasta: "", tipo: "", medio: "",
+    desde: "", hasta: "", tipo: "", medio: "", moneda: "",
   });
 
   useEffect(() => {
@@ -19,87 +19,121 @@ function Caja() {
     return () => { unsubVentas(); unsubCompras(); };
   }, []);
 
-  const fmt = (n) => "$" + Number(n || 0).toLocaleString("es-AR");
+  const fmt = (n, moneda) => {
+    const simbolo = moneda === "USD" ? "USD " : "$";
+    return simbolo + Number(n || 0).toLocaleString("es-AR");
+  };
 
   const movimientos = [
     ...ventas.map((v) => ({
       fecha: v.fecha,
       tipo: "ingreso",
       concepto: `${v.cliente} — ${v.producto}`,
-      medio: v.medio,
+      medio: v.medio || "—",
       monto: v.total || 0,
+      moneda: v.moneda || "ARS",
       estado: v.pago === "pagado" ? "cobrado" : v.pago,
     })),
     ...compras.map((c) => ({
       fecha: c.fecha,
       tipo: "egreso",
       concepto: `${c.proveedorNombre} — ${c.producto}`,
-      medio: "Transferencia",
+      medio: c.medio || "Transferencia",
       monto: c.total || 0,
+      moneda: c.moneda || "ARS",
       estado: c.pago === "pagado" ? "pagado" : "pendiente",
     })),
-  ].sort((a, b) => b.fecha?.localeCompare(a.fecha));
+  ].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
 
   const movFiltrados = movimientos.filter((m) => {
     if (filtros.desde && m.fecha < filtros.desde) return false;
     if (filtros.hasta && m.fecha > filtros.hasta) return false;
     if (filtros.tipo && m.tipo !== filtros.tipo) return false;
     if (filtros.medio && m.medio !== filtros.medio) return false;
+    if (filtros.moneda && m.moneda !== filtros.moneda) return false;
     return true;
   });
 
-  const ingresados = movFiltrados
-    .filter((m) => m.tipo === "ingreso" && m.estado === "cobrado")
-    .reduce((a, m) => a + m.monto, 0);
+  // Métricas ARS
+  const ingresadosARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
+  const egresadosARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
+  const porCobrarARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado !== "cobrado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
+  const porPagarARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
 
-  const egresados = movFiltrados
-    .filter((m) => m.tipo === "egreso" && m.estado === "pagado")
-    .reduce((a, m) => a + m.monto, 0);
+  // Métricas USD
+  const ingresadosUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const egresadosUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const porCobrarUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado !== "cobrado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const porPagarUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
 
-  const porCobrar = movFiltrados
-    .filter((m) => m.tipo === "ingreso" && m.estado !== "cobrado")
-    .reduce((a, m) => a + m.monto, 0);
-
-  const porPagar = movFiltrados
-    .filter((m) => m.tipo === "egreso" && m.estado !== "pagado")
-    .reduce((a, m) => a + m.monto, 0);
-
+  // Desglose por medio de pago
   const medios = {};
   movFiltrados.forEach((m) => {
-    if (!medios[m.medio]) medios[m.medio] = { ingresado: 0, egresado: 0 };
-    if (m.tipo === "ingreso" && m.estado === "cobrado") medios[m.medio].ingresado += m.monto;
-    if (m.tipo === "egreso" && m.estado === "pagado") medios[m.medio].egresado += m.monto;
+    const key = `${m.medio}___${m.moneda}`;
+    if (!medios[key]) medios[key] = { medio: m.medio, moneda: m.moneda, ingresado: 0, egresado: 0 };
+    if (m.tipo === "ingreso" && m.estado === "cobrado") medios[key].ingresado += m.monto;
+    if (m.tipo === "egreso" && m.estado === "pagado") medios[key].egresado += m.monto;
   });
 
   return (
     <div className="section">
       <h2 className="section-title">Caja</h2>
 
-      <div className="metrics-grid">
+      {/* Métricas ARS */}
+      <p className="card-title" style={{ marginBottom: "8px" }}>Pesos (ARS)</p>
+      <div className="metrics-grid" style={{ marginBottom: "1.25rem" }}>
         <div className="metric-card">
           <p className="metric-label">Ingresos cobrados</p>
-          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(ingresados)}</p>
+          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(ingresadosARS, "ARS")}</p>
         </div>
         <div className="metric-card">
           <p className="metric-label">Egresos pagados</p>
-          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(egresados)}</p>
+          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(egresadosARS, "ARS")}</p>
         </div>
         <div className="metric-card">
           <p className="metric-label">Balance neto</p>
-          <p className="metric-value" style={{ color: ingresados - egresados >= 0 ? "#1D9E75" : "#A32D2D" }}>
-            {fmt(ingresados - egresados)}
+          <p className="metric-value" style={{ color: ingresadosARS - egresadosARS >= 0 ? "#1D9E75" : "#A32D2D" }}>
+            {fmt(ingresadosARS - egresadosARS, "ARS")}
           </p>
         </div>
         <div className="metric-card">
           <p className="metric-label">Por cobrar</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porCobrar)}</p>
+          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porCobrarARS, "ARS")}</p>
         </div>
         <div className="metric-card">
           <p className="metric-label">Por pagar</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagar)}</p>
+          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarARS, "ARS")}</p>
         </div>
       </div>
 
+      {/* Métricas USD */}
+      <p className="card-title" style={{ marginBottom: "8px" }}>Dólares (USD)</p>
+      <div className="metrics-grid" style={{ marginBottom: "1.5rem" }}>
+        <div className="metric-card">
+          <p className="metric-label">Ingresos cobrados</p>
+          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(ingresadosUSD, "USD")}</p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Egresos pagados</p>
+          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(egresadosUSD, "USD")}</p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Balance neto</p>
+          <p className="metric-value" style={{ color: ingresadosUSD - egresadosUSD >= 0 ? "#1D9E75" : "#A32D2D" }}>
+            {fmt(ingresadosUSD - egresadosUSD, "USD")}
+          </p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Por cobrar</p>
+          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porCobrarUSD, "USD")}</p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Por pagar</p>
+          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarUSD, "USD")}</p>
+        </div>
+      </div>
+
+      {/* Filtros */}
       <div className="card">
         <h3 className="card-title">Filtros</h3>
         <div className="filters">
@@ -130,25 +164,38 @@ function Caja() {
               <option>Mercado Pago</option>
             </select>
           </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", tipo: "", medio: "" })}>
+          <div className="form-group">
+            <label>Moneda</label>
+            <select value={filtros.moneda} onChange={(e) => setFiltros({ ...filtros, moneda: e.target.value })}>
+              <option value="">Todas</option>
+              <option value="ARS">Pesos (ARS)</option>
+              <option value="USD">Dólares (USD)</option>
+            </select>
+          </div>
+          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", tipo: "", medio: "", moneda: "" })}>
             Limpiar
           </button>
         </div>
       </div>
 
+      {/* Desglose por medio */}
       <div className="card">
         <h3 className="card-title">Desglose por medio de pago</h3>
-        {Object.entries(medios).map(([medio, d]) => (
-          <div key={medio} className="list-item">
-            <p className="item-main">{medio}</p>
+        {Object.values(medios).map((d, i) => (
+          <div key={i} className="list-item">
+            <div>
+              <p className="item-main">{d.medio}</p>
+              <p className="item-sub">{d.moneda === "USD" ? "Dólares" : "Pesos"}</p>
+            </div>
             <div style={{ display: "flex", gap: "1rem", fontSize: "13px" }}>
-              <span>Ingresado: <strong style={{ color: "#1D9E75" }}>{fmt(d.ingresado)}</strong></span>
-              <span>Egresado: <strong style={{ color: "#A32D2D" }}>{fmt(d.egresado)}</strong></span>
+              <span>Ingresado: <strong style={{ color: "#1D9E75" }}>{fmt(d.ingresado, d.moneda)}</strong></span>
+              <span>Egresado: <strong style={{ color: "#A32D2D" }}>{fmt(d.egresado, d.moneda)}</strong></span>
             </div>
           </div>
         ))}
       </div>
 
+      {/* Tabla movimientos */}
       <div className="card">
         <h3 className="card-title">Movimientos</h3>
         <div className="table-wrap">
@@ -156,7 +203,7 @@ function Caja() {
             <thead>
               <tr>
                 <th>Fecha</th><th>Tipo</th><th>Concepto</th>
-                <th>Medio</th><th>Monto</th><th>Estado</th>
+                <th>Medio</th><th>Moneda</th><th>Monto</th><th>Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -170,7 +217,12 @@ function Caja() {
                   </td>
                   <td>{m.concepto}</td>
                   <td>{m.medio}</td>
-                  <td>{fmt(m.monto)}</td>
+                  <td>
+                    <span className={`badge badge-${m.moneda === "USD" ? "blue" : "green"}`}>
+                      {m.moneda}
+                    </span>
+                  </td>
+                  <td>{fmt(m.monto, m.moneda)}</td>
                   <td>
                     <span className={`badge badge-${m.estado === "cobrado" || m.estado === "pagado" ? "green" : "amber"}`}>
                       {m.estado}

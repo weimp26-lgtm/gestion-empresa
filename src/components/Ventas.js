@@ -10,33 +10,69 @@ import {
 
 function Ventas() {
   const [ventas, setVentas] = useState([]);
-  const [stock, setStock] = useState([]);
+  const [compras, setCompras] = useState([]);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [editando, setEditando] = useState(null);
+  const [verDetalle, setVerDetalle] = useState(null);
   const [filtros, setFiltros] = useState({
-    desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "",
+    desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "",
   });
-  const [form, setForm] = useState({
+
+  const formVacio = {
     fecha: new Date().toISOString().split("T")[0],
     cliente: "",
+    emailCliente: "",
+    telCliente: "",
+    domicilioCliente: "",
     producto: "",
     cantidad: 1,
     precio: 0,
     medio: "Efectivo",
     pago: "pagado",
     entrega: "entregado",
-  });
+    fechaEntrega: "",
+    moneda: "ARS",
+    estafa: false,
+    notaEstafa: "",
+  };
+
+  const [form, setForm] = useState(formVacio);
 
   useEffect(() => {
     const unsubVentas = onSnapshot(collection(db, "ventas"), (snap) => {
       setVentas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    const unsubStock = onSnapshot(collection(db, "stock"), (snap) => {
-      setStock(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const unsubCompras = onSnapshot(collection(db, "compras"), (snap) => {
+      setCompras(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return () => { unsubVentas(); unsubStock(); };
+    return () => { unsubVentas(); unsubCompras(); };
   }, []);
 
-  const fmt = (n) => "$" + Number(n || 0).toLocaleString("es-AR");
+  const fmt = (n, moneda) => {
+    const simbolo = moneda === "USD" ? "USD " : "$";
+    return simbolo + Number(n || 0).toLocaleString("es-AR");
+  };
+
+  const calcularStock = () => {
+    const productos = {};
+    compras.forEach((c) => {
+      const nombre = c.producto?.trim();
+      if (!nombre) return;
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, vendido: 0 };
+      productos[nombre].comprado += Number(c.cantidad || 0);
+    });
+    ventas.forEach((v) => {
+      const nombre = v.producto?.trim();
+      if (!nombre) return;
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, vendido: 0 };
+      productos[nombre].vendido += Number(v.cantidad || 0);
+    });
+    return Object.entries(productos)
+      .map(([nombre, d]) => ({ nombre, stockActual: d.comprado - d.vendido }))
+      .filter((p) => p.stockActual > 0);
+  };
+
+  const stockDisponible = calcularStock();
 
   const ventasFiltradas = ventas.filter((v) => {
     if (filtros.desde && v.fecha < filtros.desde) return false;
@@ -45,22 +81,63 @@ function Ventas() {
     if (filtros.pago && v.pago !== filtros.pago) return false;
     if (filtros.entrega && v.entrega !== filtros.entrega) return false;
     if (filtros.medio && v.medio !== filtros.medio) return false;
+    if (filtros.estafa === "si" && !v.estafa) return false;
+    if (filtros.estafa === "no" && v.estafa) return false;
     return true;
   });
 
-  const totalFiltrado = ventasFiltradas.reduce((a, v) => a + (v.total || 0), 0);
-  const cobradoFiltrado = ventasFiltradas.filter((v) => v.pago === "pagado").reduce((a, v) => a + (v.total || 0), 0);
+  const totalFiltrado = ventasFiltradas.filter(v => !v.estafa).reduce((a, v) => a + (v.total || 0), 0);
+  const cobradoFiltrado = ventasFiltradas.filter(v => !v.estafa && v.pago === "pagado").reduce((a, v) => a + (v.total || 0), 0);
+  const totalEstafas = ventas.filter(v => v.estafa).reduce((a, v) => a + (v.total || 0), 0);
+  const cantEstafas = ventas.filter(v => v.estafa).length;
+
+  const abrirEditar = (v) => {
+    setVerDetalle(null);
+    setEditando(v.id);
+    setForm({
+      fecha: v.fecha || "",
+      cliente: v.cliente || "",
+      emailCliente: v.emailCliente || "",
+      telCliente: v.telCliente || "",
+      domicilioCliente: v.domicilioCliente || "",
+      producto: v.producto || "",
+      cantidad: v.cantidad || 1,
+      precio: v.precio || 0,
+      medio: v.medio || "Efectivo",
+      pago: v.pago || "pagado",
+      entrega: v.entrega || "entregado",
+      fechaEntrega: v.fechaEntrega || "",
+      moneda: v.moneda || "ARS",
+      estafa: v.estafa || false,
+      notaEstafa: v.notaEstafa || "",
+    });
+    setMostrarForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelar = () => {
+    setMostrarForm(false);
+    setEditando(null);
+    setForm(formVacio);
+  };
 
   const guardarVenta = async (e) => {
     e.preventDefault();
     const total = Number(form.cantidad) * Number(form.precio);
-    await addDoc(collection(db, "ventas"), { ...form, total, cantidad: Number(form.cantidad), precio: Number(form.precio) });
-    const prod = stock.find((s) => s.nombre === form.producto);
-    if (prod) {
-      await updateDoc(doc(db, "stock", prod.id), { qty: Math.max(0, (prod.qty || 0) - Number(form.cantidad)) });
+    if (!editando) {
+      const prodStock = stockDisponible.find((s) => s.nombre === form.producto);
+      if (prodStock && Number(form.cantidad) > prodStock.stockActual) {
+        alert(`Solo tenés ${prodStock.stockActual} unidades disponibles de ${form.producto}`);
+        return;
+      }
     }
-    setMostrarForm(false);
-    setForm({ fecha: new Date().toISOString().split("T")[0], cliente: "", producto: "", cantidad: 1, precio: 0, medio: "Efectivo", pago: "pagado", entrega: "entregado" });
+    const datos = { ...form, total, cantidad: Number(form.cantidad), precio: Number(form.precio) };
+    if (editando) {
+      await updateDoc(doc(db, "ventas", editando), datos);
+    } else {
+      await addDoc(collection(db, "ventas"), datos);
+    }
+    cancelar();
   };
 
   const marcarEntregado = async (id) => {
@@ -71,36 +148,158 @@ function Ventas() {
     await updateDoc(doc(db, "ventas", id), { pago: "pagado" });
   };
 
+  const marcarEstafa = async (v) => {
+    if (v.estafa) {
+      if (window.confirm("¿Querés quitar la marca de estafa?")) {
+        await updateDoc(doc(db, "ventas", v.id), { estafa: false, notaEstafa: "" });
+      }
+    } else {
+      const nota = window.prompt("Describí brevemente la estafa (opcional):");
+      if (nota === null) return;
+      await updateDoc(doc(db, "ventas", v.id), { estafa: true, notaEstafa: nota, pago: "pendiente" });
+    }
+  };
+
+  const FilaDetalle = ({ label, value }) => {
+    if (!value) return null;
+    return (
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
+        <span style={{ fontSize: "12px", color: "#888" }}>{label}</span>
+        <span style={{ fontSize: "13px", fontWeight: 500, textAlign: "right", maxWidth: "60%" }}>{value}</span>
+      </div>
+    );
+  };
+
   return (
     <div className="section">
       <div className="section-header">
         <h2 className="section-title">Ventas</h2>
-        <button className="btn-primary" onClick={() => setMostrarForm(!mostrarForm)}>
+        <button className="btn-primary" onClick={() => { cancelar(); setMostrarForm(!mostrarForm); }}>
           {mostrarForm ? "Cancelar" : "+ Nueva venta"}
         </button>
       </div>
 
+      {/* Alerta estafas */}
+      {cantEstafas > 0 && (
+        <div className="alert alert-red" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>🚨 {cantEstafas} venta(s) marcada(s) como estafa — {fmt(totalEstafas, "ARS")} en riesgo</span>
+          <button className="btn-xs" style={{ borderColor: "#A32D2D", color: "#A32D2D" }} onClick={() => setFiltros({ ...filtros, estafa: "si" })}>
+            Ver estafas
+          </button>
+        </div>
+      )}
+
+      {/* Modal detalle */}
+      {verDetalle && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
+          onClick={() => setVerDetalle(null)}
+        >
+          <div
+            style={{ background: "white", borderRadius: "16px", padding: "1.5rem", width: "480px", maxWidth: "95vw", maxHeight: "85vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Detalle de venta</h3>
+              <button className="btn-secondary" onClick={() => setVerDetalle(null)}>✕ Cerrar</button>
+            </div>
+
+            {verDetalle.estafa && (
+              <div className="alert alert-red" style={{ marginBottom: "1rem" }}>
+                🚨 Marcada como estafa{verDetalle.notaEstafa ? `: ${verDetalle.notaEstafa}` : ""}
+              </div>
+            )}
+
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "8px" }}>Cliente</p>
+            <FilaDetalle label="Nombre" value={verDetalle.cliente} />
+            <FilaDetalle label="Email" value={verDetalle.emailCliente} />
+            <FilaDetalle label="Teléfono" value={verDetalle.telCliente} />
+            <FilaDetalle label="Domicilio" value={verDetalle.domicilioCliente} />
+
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Venta</p>
+            <FilaDetalle label="Fecha de venta" value={verDetalle.fecha} />
+            <FilaDetalle label="Fecha de entrega" value={verDetalle.fechaEntrega || "No especificada"} />
+            <FilaDetalle label="Producto" value={verDetalle.producto} />
+            <FilaDetalle label="Cantidad" value={verDetalle.cantidad} />
+            <FilaDetalle label="Precio unitario" value={fmt(verDetalle.precio, verDetalle.moneda)} />
+            <FilaDetalle label="Total" value={fmt(verDetalle.total, verDetalle.moneda)} />
+            <FilaDetalle label="Moneda" value={verDetalle.moneda || "ARS"} />
+
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Pago y entrega</p>
+            <FilaDetalle label="Medio de pago" value={verDetalle.medio} />
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
+              <span style={{ fontSize: "12px", color: "#888" }}>Estado pago</span>
+              <span className={`badge badge-${verDetalle.pago === "pagado" ? "green" : verDetalle.pago === "parcial" ? "amber" : "red"}`}>{verDetalle.pago}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
+              <span style={{ fontSize: "12px", color: "#888" }}>Estado entrega</span>
+              <span className={`badge badge-${verDetalle.entrega === "entregado" ? "green" : verDetalle.entrega === "programado" ? "blue" : "amber"}`}>{verDetalle.entrega}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0" }}>
+              <span style={{ fontSize: "12px", color: "#888" }}>Estafa</span>
+              <span className={`badge badge-${verDetalle.estafa ? "red" : "green"}`}>{verDetalle.estafa ? "🚨 Sí" : "No"}</span>
+            </div>
+
+            <div style={{ marginTop: "1rem", display: "flex", gap: "8px" }}>
+              <button className="btn-primary" onClick={() => abrirEditar(verDetalle)}>✏️ Editar</button>
+              <button
+                className="btn-xs"
+                style={{ borderColor: verDetalle.estafa ? "#888" : "#A32D2D", color: verDetalle.estafa ? "#888" : "#A32D2D" }}
+                onClick={() => { marcarEstafa(verDetalle); setVerDetalle(null); }}
+              >
+                {verDetalle.estafa ? "✓ Quitar estafa" : "🚨 Marcar estafa"}
+              </button>
+              <button className="btn-secondary" onClick={() => setVerDetalle(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Formulario */}
       {mostrarForm && (
         <div className="card">
-          <h3 className="card-title">Registrar venta</h3>
+          <h3 className="card-title">{editando ? "Editar venta" : "Registrar venta"}</h3>
           <form onSubmit={guardarVenta}>
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "8px" }}>Datos del cliente</p>
             <div className="form-grid">
               <div className="form-group">
-                <label>Cliente</label>
+                <label>Nombre del cliente</label>
                 <input value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Fecha</label>
+                <label>Email (opcional)</label>
+                <input type="email" value={form.emailCliente} onChange={(e) => setForm({ ...form, emailCliente: e.target.value })} placeholder="cliente@email.com" />
+              </div>
+              <div className="form-group">
+                <label>Teléfono (opcional)</label>
+                <input value={form.telCliente} onChange={(e) => setForm({ ...form, telCliente: e.target.value })} placeholder="11-1234-5678" />
+              </div>
+              <div className="form-group">
+                <label>Domicilio (opcional)</label>
+                <input value={form.domicilioCliente} onChange={(e) => setForm({ ...form, domicilioCliente: e.target.value })} placeholder="Calle 123, Ciudad" />
+              </div>
+            </div>
+
+            <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", margin: "12px 0 8px" }}>Datos de la venta</p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label>Fecha de venta</label>
                 <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} required />
               </div>
               <div className="form-group">
-                <label>Producto</label>
-                <select value={form.producto} onChange={(e) => {
-                  const prod = stock.find((s) => s.nombre === e.target.value);
-                  setForm({ ...form, producto: e.target.value, precio: prod?.precio || 0 });
-                }}>
+                <label>Fecha de entrega</label>
+                <input type="date" value={form.fechaEntrega} onChange={(e) => setForm({ ...form, fechaEntrega: e.target.value })} />
+              </div>
+              <div className="form-group">
+                <label>Producto (stock disponible)</label>
+                <select value={form.producto} onChange={(e) => setForm({ ...form, producto: e.target.value })} required>
                   <option value="">— seleccionar —</option>
-                  {stock.map((s) => <option key={s.id} value={s.nombre}>{s.nombre}</option>)}
+                  {stockDisponible.map((s) => (
+                    <option key={s.nombre} value={s.nombre}>{s.nombre} ({s.stockActual} disponibles)</option>
+                  ))}
+                  {editando && form.producto && !stockDisponible.find(s => s.nombre === form.producto) && (
+                    <option value={form.producto}>{form.producto}</option>
+                  )}
                 </select>
               </div>
               <div className="form-group">
@@ -110,6 +309,13 @@ function Ventas() {
               <div className="form-group">
                 <label>Precio unitario</label>
                 <input type="number" value={form.precio} onChange={(e) => setForm({ ...form, precio: e.target.value })} required />
+              </div>
+              <div className="form-group">
+                <label>Moneda</label>
+                <select value={form.moneda} onChange={(e) => setForm({ ...form, moneda: e.target.value })}>
+                  <option value="ARS">Pesos (ARS)</option>
+                  <option value="USD">Dólares (USD)</option>
+                </select>
               </div>
               <div className="form-group">
                 <label>Medio de pago</label>
@@ -138,14 +344,19 @@ function Ventas() {
                 </select>
               </div>
             </div>
+
             <div className="total-preview">
-              Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio))}</strong>
+              Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio), form.moneda)}</strong>
             </div>
-            <button type="submit" className="btn-primary">Guardar venta</button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button type="submit" className="btn-primary">{editando ? "Guardar cambios" : "Guardar venta"}</button>
+              <button type="button" className="btn-secondary" onClick={cancelar}>Cancelar</button>
+            </div>
           </form>
         </div>
       )}
 
+      {/* Filtros */}
       <div className="card">
         <h3 className="card-title">Filtros</h3>
         <div className="filters">
@@ -190,36 +401,64 @@ function Ventas() {
               <option>Mercado Pago</option>
             </select>
           </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "" })}>
+          <div className="form-group">
+            <label>Estafa</label>
+            <select value={filtros.estafa} onChange={(e) => setFiltros({ ...filtros, estafa: e.target.value })}>
+              <option value="">Todas</option>
+              <option value="no">Sin estafa</option>
+              <option value="si">Solo estafas</option>
+            </select>
+          </div>
+          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "" })}>
             Limpiar
           </button>
         </div>
       </div>
 
+      {/* Tabla */}
       <div className="card">
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Fecha</th><th>Cliente</th><th>Producto</th><th>Cant.</th>
-                <th>Total</th><th>Entrega</th><th>Pago</th><th>Medio</th><th>Acciones</th>
+                <th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
+                <th>Teléfono</th><th>Producto</th><th>Cant.</th>
+                <th>Total</th><th>Moneda</th><th>Entrega</th><th>Pago</th><th>Medio</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
               {[...ventasFiltradas].reverse().map((v) => (
-                <tr key={v.id}>
+                <tr key={v.id} style={v.estafa ? { background: "#FFF5F5" } : {}}>
                   <td>{v.fecha}</td>
-                  <td>{v.cliente}</td>
+                  <td>{v.fechaEntrega || "—"}</td>
+                  <td>
+                    <div>
+                      <p style={{ fontWeight: 500 }}>{v.cliente}</p>
+                      {v.estafa && <span className="badge badge-red">🚨 Estafa</span>}
+                      {v.emailCliente && <p style={{ fontSize: "11px", color: "#888" }}>{v.emailCliente}</p>}
+                    </div>
+                  </td>
+                  <td>{v.telCliente || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{v.cantidad}</td>
-                  <td>{fmt(v.total)}</td>
+                  <td>{fmt(v.total, v.moneda)}</td>
+                  <td><span className={`badge badge-${v.moneda === "USD" ? "blue" : "green"}`}>{v.moneda || "ARS"}</span></td>
                   <td><span className={`badge badge-${v.entrega === "entregado" ? "green" : v.entrega === "programado" ? "blue" : "amber"}`}>{v.entrega}</span></td>
                   <td><span className={`badge badge-${v.pago === "pagado" ? "green" : v.pago === "parcial" ? "amber" : "red"}`}>{v.pago}</span></td>
                   <td>{v.medio}</td>
                   <td>
                     <div className="action-btns">
-                      {v.entrega !== "entregado" && <button className="btn-xs" onClick={() => marcarEntregado(v.id)}>✓ Entregado</button>}
-                      {v.pago !== "pagado" && <button className="btn-xs" onClick={() => marcarPagado(v.id)}>✓ Pagado</button>}
+                      <button className="btn-xs" onClick={() => setVerDetalle(v)}>🔍 Ver</button>
+                      <button className="btn-xs" onClick={() => abrirEditar(v)}>✏️ Editar</button>
+                      <button
+                        className="btn-xs"
+                        style={{ borderColor: v.estafa ? "#888" : "#A32D2D", color: v.estafa ? "#888" : "#A32D2D" }}
+                        onClick={() => marcarEstafa(v)}
+                      >
+                        {v.estafa ? "✓ Quitar" : "🚨 Estafa"}
+                      </button>
+                      {v.entrega !== "entregado" && !v.estafa && <button className="btn-xs" onClick={() => marcarEntregado(v.id)}>✓ Entregado</button>}
+                      {v.pago !== "pagado" && !v.estafa && <button className="btn-xs" onClick={() => marcarPagado(v.id)}>✓ Pagado</button>}
                     </div>
                   </td>
                 </tr>
@@ -228,9 +467,10 @@ function Ventas() {
           </table>
         </div>
         <div className="table-footer">
-          <span>Total: <strong>{fmt(totalFiltrado)}</strong></span>
-          <span>Cobrado: <strong style={{color:"#1D9E75"}}>{fmt(cobradoFiltrado)}</strong></span>
-          <span>Pendiente: <strong style={{color:"#BA7517"}}>{fmt(totalFiltrado - cobradoFiltrado)}</strong></span>
+          <span>Total (sin estafas): <strong>{fmt(totalFiltrado, "ARS")}</strong></span>
+          <span>Cobrado: <strong style={{ color: "#1D9E75" }}>{fmt(cobradoFiltrado, "ARS")}</strong></span>
+          <span>Pendiente: <strong style={{ color: "#BA7517" }}>{fmt(totalFiltrado - cobradoFiltrado, "ARS")}</strong></span>
+          {cantEstafas > 0 && <span>En estafas: <strong style={{ color: "#A32D2D" }}>{fmt(totalEstafas, "ARS")}</strong></span>}
         </div>
       </div>
     </div>

@@ -1,144 +1,152 @@
 import React, { useEffect, useState } from "react";
 import { db } from "../firebase";
-import {
-  collection,
-  onSnapshot,
-  addDoc,
-  updateDoc,
-  doc,
-} from "firebase/firestore";
+import { collection, onSnapshot } from "firebase/firestore";
 
 function Stock() {
-  const [stock, setStock] = useState([]);
-  const [mostrarForm, setMostrarForm] = useState(false);
+  const [compras, setCompras] = useState([]);
+  const [ventas, setVentas] = useState([]);
   const [filtros, setFiltros] = useState({ nombre: "", nivel: "" });
-  const [form, setForm] = useState({
-    nombre: "",
-    qty: 1,
-    costo: 0,
-    precio: 0,
-    cat: "Computadoras",
-    minAlert: 3,
-  });
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, "stock"), (snap) => {
-      setStock(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    const unsubCompras = onSnapshot(collection(db, "compras"), (snap) => {
+      setCompras(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return unsub;
+    const unsubVentas = onSnapshot(collection(db, "ventas"), (snap) => {
+      setVentas(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => { unsubCompras(); unsubVentas(); };
   }, []);
 
   const fmt = (n) => "$" + Number(n || 0).toLocaleString("es-AR");
 
-  const stockFiltrado = stock.filter((s) => {
-    if (filtros.nombre && !s.nombre?.toLowerCase().includes(filtros.nombre.toLowerCase())) return false;
-    if (filtros.nivel === "critico" && s.qty > 3) return false;
-    if (filtros.nivel === "bajo" && s.qty > 6) return false;
+  // Calcular stock real por producto en base a compras y ventas
+  const calcularStock = () => {
+    const productos = {};
+
+    // Sumar todo lo comprado
+    compras.forEach((c) => {
+      const nombre = c.producto?.trim();
+      if (!nombre) return;
+      if (!productos[nombre]) {
+        productos[nombre] = {
+          nombre,
+          comprado: 0,
+          vendido: 0,
+          costoUnit: 0,
+          precioVenta: 0,
+          moneda: c.moneda || "ARS",
+        };
+      }
+      productos[nombre].comprado += Number(c.cantidad || 0);
+      productos[nombre].costoUnit = Number(c.costoUnit || 0);
+      productos[nombre].moneda = c.moneda || "ARS";
+    });
+
+    // Restar todo lo vendido
+    ventas.forEach((v) => {
+      const nombre = v.producto?.trim();
+      if (!nombre) return;
+      if (!productos[nombre]) {
+        productos[nombre] = {
+          nombre,
+          comprado: 0,
+          vendido: 0,
+          costoUnit: 0,
+          precioVenta: 0,
+          moneda: "ARS",
+        };
+      }
+      productos[nombre].vendido += Number(v.cantidad || 0);
+      productos[nombre].precioVenta = Number(v.precio || 0);
+    });
+
+    return Object.values(productos).map((p) => ({
+      ...p,
+      stockActual: p.comprado - p.vendido,
+    }));
+  };
+
+  const stockCalculado = calcularStock();
+
+  const stockFiltrado = stockCalculado.filter((s) => {
+    if (filtros.nombre && !s.nombre.toLowerCase().includes(filtros.nombre.toLowerCase())) return false;
+    if (filtros.nivel === "critico" && s.stockActual > 3) return false;
+    if (filtros.nivel === "bajo" && s.stockActual > 6) return false;
     return true;
   });
 
-  const totalUnidades = stock.reduce((a, s) => a + (s.qty || 0), 0);
-  const valorCosto = stock.reduce((a, s) => a + (s.qty || 0) * (s.costo || 0), 0);
-  const valorVenta = stock.reduce((a, s) => a + (s.qty || 0) * (s.precio || 0), 0);
-
-  const guardarProducto = async (e) => {
-    e.preventDefault();
-    await addDoc(collection(db, "stock"), {
-      ...form,
-      qty: Number(form.qty),
-      costo: Number(form.costo),
-      precio: Number(form.precio),
-      minAlert: Number(form.minAlert),
-    });
-    setMostrarForm(false);
-    setForm({ nombre: "", qty: 1, costo: 0, precio: 0, cat: "Computadoras", minAlert: 3 });
-  };
-
-  const actualizarQty = async (id, delta, actual) => {
-    const nueva = Math.max(0, (actual || 0) + delta);
-    await updateDoc(doc(db, "stock", id), { qty: nueva });
-  };
+  // Métricas generales
+  const totalProductos = stockCalculado.length;
+  const totalUnidades = stockCalculado.reduce((a, s) => a + s.stockActual, 0);
+  const valorInvertido = stockCalculado.reduce((a, s) => a + s.stockActual * s.costoUnit, 0);
+  const valorVenta = stockCalculado.reduce((a, s) => a + s.stockActual * s.precioVenta, 0);
+  const gananciaPotencial = valorVenta - valorInvertido;
+  const margenPromedio = valorVenta > 0 ? Math.round((valorVenta - valorInvertido) / valorVenta * 100) : 0;
 
   return (
     <div className="section">
-      <div className="section-header">
-        <h2 className="section-title">Stock</h2>
-        <button className="btn-primary" onClick={() => setMostrarForm(!mostrarForm)}>
-          {mostrarForm ? "Cancelar" : "+ Agregar producto"}
-        </button>
-      </div>
+      <h2 className="section-title">Stock</h2>
 
+      {/* Métricas */}
       <div className="metrics-grid">
         <div className="metric-card">
           <p className="metric-label">Productos distintos</p>
-          <p className="metric-value" style={{ color: "#185FA5" }}>{stock.length}</p>
+          <p className="metric-value" style={{ color: "#185FA5" }}>{totalProductos}</p>
         </div>
         <div className="metric-card">
-          <p className="metric-label">Unidades totales</p>
+          <p className="metric-label">Unidades en stock</p>
           <p className="metric-value" style={{ color: "#185FA5" }}>{totalUnidades}</p>
         </div>
         <div className="metric-card">
-          <p className="metric-label">Valor de costo</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(valorCosto)}</p>
+          <p className="metric-label">Invertido (costo)</p>
+          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(valorInvertido)}</p>
         </div>
         <div className="metric-card">
           <p className="metric-label">Valor de venta</p>
           <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(valorVenta)}</p>
         </div>
         <div className="metric-card">
-          <p className="metric-label">Margen estimado</p>
-          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(valorVenta - valorCosto)}</p>
+          <p className="metric-label">Ganancia potencial</p>
+          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(gananciaPotencial)}</p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Margen promedio</p>
+          <p className="metric-value" style={{ color: margenPromedio >= 20 ? "#1D9E75" : "#BA7517" }}>
+            {margenPromedio}%
+          </p>
         </div>
       </div>
 
-      {mostrarForm && (
-        <div className="card">
-          <h3 className="card-title">Agregar producto</h3>
-          <form onSubmit={guardarProducto}>
-            <div className="form-grid">
-              <div className="form-group">
-                <label>Nombre del producto</label>
-                <input value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>Cantidad inicial</label>
-                <input type="number" min="0" value={form.qty} onChange={(e) => setForm({ ...form, qty: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>Precio de costo</label>
-                <input type="number" value={form.costo} onChange={(e) => setForm({ ...form, costo: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>Precio de venta</label>
-                <input type="number" value={form.precio} onChange={(e) => setForm({ ...form, precio: e.target.value })} required />
-              </div>
-              <div className="form-group">
-                <label>Categoría</label>
-                <select value={form.cat} onChange={(e) => setForm({ ...form, cat: e.target.value })}>
-                  <option>Computadoras</option>
-                  <option>Monitores</option>
-                  <option>Periféricos</option>
-                  <option>Redes</option>
-                  <option>Accesorios</option>
-                  <option>Otro</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Stock mínimo (alerta)</label>
-                <input type="number" min="0" value={form.minAlert} onChange={(e) => setForm({ ...form, minAlert: e.target.value })} />
-              </div>
-            </div>
-            <button type="submit" className="btn-primary">Guardar producto</button>
-          </form>
+      {/* Balance resumen */}
+      <div className="card" style={{ borderLeft: "3px solid #1D9E75" }}>
+        <h3 className="card-title">Balance de stock</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1rem" }}>
+          <div>
+            <p style={{ color: "#888", fontSize: "12px", marginBottom: "4px" }}>Invertido en stock actual</p>
+            <p style={{ fontSize: "18px", fontWeight: 500, color: "#A32D2D" }}>{fmt(valorInvertido)}</p>
+          </div>
+          <div>
+            <p style={{ color: "#888", fontSize: "12px", marginBottom: "4px" }}>Si vendés todo al precio actual</p>
+            <p style={{ fontSize: "18px", fontWeight: 500, color: "#1D9E75" }}>{fmt(valorVenta)}</p>
+          </div>
+          <div>
+            <p style={{ color: "#888", fontSize: "12px", marginBottom: "4px" }}>Ganancia potencial ({margenPromedio}%)</p>
+            <p style={{ fontSize: "18px", fontWeight: 500, color: "#185FA5" }}>{fmt(gananciaPotencial)}</p>
+          </div>
         </div>
-      )}
+      </div>
 
+      {/* Filtros */}
       <div className="card">
         <h3 className="card-title">Filtros</h3>
         <div className="filters">
           <div className="form-group">
             <label>Buscar producto</label>
-            <input placeholder="Nombre..." value={filtros.nombre} onChange={(e) => setFiltros({ ...filtros, nombre: e.target.value })} />
+            <input
+              placeholder="Nombre..."
+              value={filtros.nombre}
+              onChange={(e) => setFiltros({ ...filtros, nombre: e.target.value })}
+            />
           </div>
           <div className="form-group">
             <label>Nivel de stock</label>
@@ -148,37 +156,52 @@ function Stock() {
               <option value="bajo">Bajo (6 o menos)</option>
             </select>
           </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ nombre: "", nivel: "" })}>Limpiar</button>
+          <button className="btn-secondary" onClick={() => setFiltros({ nombre: "", nivel: "" })}>
+            Limpiar
+          </button>
         </div>
       </div>
 
+      {/* Tabla */}
       <div className="card">
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Producto</th><th>Categoría</th><th>Stock</th>
-                <th>Costo</th><th>Venta</th><th>Margen</th><th>Ajustar</th>
+                <th>Producto</th>
+                <th>Comprado</th>
+                <th>Vendido</th>
+                <th>Stock actual</th>
+                <th>Costo unit.</th>
+                <th>Precio venta</th>
+                <th>Margen %</th>
+                <th>Valor en stock</th>
               </tr>
             </thead>
             <tbody>
-              {stockFiltrado.map((s) => {
-                const margen = s.precio > 0 ? Math.round((s.precio - s.costo) / s.precio * 100) : 0;
-                const nivel = s.qty <= (s.minAlert || 3) ? "red" : s.qty <= 6 ? "amber" : "green";
+              {stockFiltrado.map((s, i) => {
+                const margen = s.precioVenta > 0
+                  ? Math.round((s.precioVenta - s.costoUnit) / s.precioVenta * 100)
+                  : 0;
+                const nivel = s.stockActual <= 3 ? "red" : s.stockActual <= 6 ? "amber" : "green";
                 return (
-                  <tr key={s.id}>
-                    <td>{s.nombre}</td>
-                    <td>{s.cat}</td>
-                    <td><span className={`badge badge-${nivel}`}>{s.qty} uds.</span></td>
-                    <td>{fmt(s.costo)}</td>
-                    <td>{fmt(s.precio)}</td>
-                    <td>{margen}%</td>
+                  <tr key={i}>
+                    <td><strong>{s.nombre}</strong></td>
+                    <td>{s.comprado}</td>
+                    <td>{s.vendido}</td>
                     <td>
-                      <div className="action-btns">
-                        <button className="btn-xs" onClick={() => actualizarQty(s.id, -1, s.qty)}>−</button>
-                        <button className="btn-xs" onClick={() => actualizarQty(s.id, 1, s.qty)}>+</button>
-                      </div>
+                      <span className={`badge badge-${nivel}`}>
+                        {s.stockActual} uds.
+                      </span>
                     </td>
+                    <td>{fmt(s.costoUnit)}</td>
+                    <td>{fmt(s.precioVenta)}</td>
+                    <td>
+                      <span style={{ color: margen >= 20 ? "#1D9E75" : "#BA7517", fontWeight: 500 }}>
+                        {margen}%
+                      </span>
+                    </td>
+                    <td>{fmt(s.stockActual * s.costoUnit)}</td>
                   </tr>
                 );
               })}

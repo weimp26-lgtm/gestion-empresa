@@ -11,10 +11,10 @@ import {
 function Compras() {
   const [compras, setCompras] = useState([]);
   const [proveedores, setProveedores] = useState([]);
-  const [stock, setStock] = useState([]);
   const [mostrarForm, setMostrarForm] = useState(false);
+  const [editando, setEditando] = useState(null);
   const [filtros, setFiltros] = useState({
-    desde: "", hasta: "", proveedor: "", pago: "",
+    desde: "", hasta: "", proveedor: "", pago: "", moneda: "",
   });
   const [form, setForm] = useState({
     fecha: new Date().toISOString().split("T")[0],
@@ -24,6 +24,8 @@ function Compras() {
     cantidad: 1,
     costoUnit: 0,
     pago: "pagado",
+    medio: "Transferencia",
+    moneda: "ARS",
   });
 
   useEffect(() => {
@@ -33,42 +35,48 @@ function Compras() {
     const unsubProv = onSnapshot(collection(db, "proveedores"), (snap) => {
       setProveedores(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    const unsubStock = onSnapshot(collection(db, "stock"), (snap) => {
-      setStock(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-    return () => { unsubCompras(); unsubProv(); unsubStock(); };
+    return () => { unsubCompras(); unsubProv(); };
   }, []);
 
-  const fmt = (n) => "$" + Number(n || 0).toLocaleString("es-AR");
+  const fmt = (n, moneda) => {
+    const simbolo = moneda === "USD" ? "USD " : "$";
+    return simbolo + Number(n || 0).toLocaleString("es-AR");
+  };
 
   const comprasFiltradas = compras.filter((c) => {
     if (filtros.desde && c.fecha < filtros.desde) return false;
     if (filtros.hasta && c.fecha > filtros.hasta) return false;
     if (filtros.proveedor && c.proveedorId !== filtros.proveedor) return false;
     if (filtros.pago && c.pago !== filtros.pago) return false;
+    if (filtros.moneda && c.moneda !== filtros.moneda) return false;
     return true;
   });
 
-  const totalFiltrado = comprasFiltradas.reduce((a, c) => a + (c.total || 0), 0);
-  const pagadoFiltrado = comprasFiltradas.filter((c) => c.pago === "pagado").reduce((a, c) => a + (c.total || 0), 0);
+  const totalARS = comprasFiltradas.filter(c => c.moneda !== "USD").reduce((a, c) => a + (c.total || 0), 0);
+  const totalUSD = comprasFiltradas.filter(c => c.moneda === "USD").reduce((a, c) => a + (c.total || 0), 0);
+  const pagadoARS = comprasFiltradas.filter(c => c.moneda !== "USD" && c.pago === "pagado").reduce((a, c) => a + (c.total || 0), 0);
+  const pagadoUSD = comprasFiltradas.filter(c => c.moneda === "USD" && c.pago === "pagado").reduce((a, c) => a + (c.total || 0), 0);
 
-  const guardarCompra = async (e) => {
-    e.preventDefault();
-    const total = Number(form.cantidad) * Number(form.costoUnit);
-    await addDoc(collection(db, "compras"), {
-      ...form,
-      total,
-      cantidad: Number(form.cantidad),
-      costoUnit: Number(form.costoUnit),
+  const abrirEditar = (c) => {
+    setEditando(c.id);
+    setForm({
+      fecha: c.fecha,
+      proveedorId: c.proveedorId || "",
+      proveedorNombre: c.proveedorNombre || "",
+      producto: c.producto || "",
+      cantidad: c.cantidad || 1,
+      costoUnit: c.costoUnit || 0,
+      pago: c.pago || "pagado",
+      medio: c.medio || "Transferencia",
+      moneda: c.moneda || "ARS",
     });
-    const prod = stock.find((s) => s.nombre === form.producto);
-    if (prod) {
-      await updateDoc(doc(db, "stock", prod.id), {
-        qty: (prod.qty || 0) + Number(form.cantidad),
-        costo: Number(form.costoUnit),
-      });
-    }
+    setMostrarForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelar = () => {
     setMostrarForm(false);
+    setEditando(null);
     setForm({
       fecha: new Date().toISOString().split("T")[0],
       proveedorId: "",
@@ -77,7 +85,28 @@ function Compras() {
       cantidad: 1,
       costoUnit: 0,
       pago: "pagado",
+      medio: "Transferencia",
+      moneda: "ARS",
     });
+  };
+
+  const guardarCompra = async (e) => {
+    e.preventDefault();
+    const total = Number(form.cantidad) * Number(form.costoUnit);
+    const datos = {
+      ...form,
+      total,
+      cantidad: Number(form.cantidad),
+      costoUnit: Number(form.costoUnit),
+    };
+
+    if (editando) {
+      await updateDoc(doc(db, "compras", editando), datos);
+    } else {
+      await addDoc(collection(db, "compras"), datos);
+    }
+
+    cancelar();
   };
 
   const marcarPagado = async (id) => {
@@ -88,14 +117,14 @@ function Compras() {
     <div className="section">
       <div className="section-header">
         <h2 className="section-title">Compras</h2>
-        <button className="btn-primary" onClick={() => setMostrarForm(!mostrarForm)}>
+        <button className="btn-primary" onClick={() => { cancelar(); setMostrarForm(!mostrarForm); }}>
           {mostrarForm ? "Cancelar" : "+ Nueva compra"}
         </button>
       </div>
 
       {mostrarForm && (
         <div className="card">
-          <h3 className="card-title">Registrar compra</h3>
+          <h3 className="card-title">{editando ? "Editar compra" : "Registrar compra"}</h3>
           <form onSubmit={guardarCompra}>
             <div className="form-grid">
               <div className="form-group">
@@ -120,19 +149,12 @@ function Compras() {
               </div>
               <div className="form-group">
                 <label>Producto</label>
-                <select
+                <input
                   value={form.producto}
-                  onChange={(e) => {
-                    const prod = stock.find((s) => s.nombre === e.target.value);
-                    setForm({ ...form, producto: e.target.value, costoUnit: prod?.costo || 0 });
-                  }}
+                  onChange={(e) => setForm({ ...form, producto: e.target.value })}
+                  placeholder="Ej: iPhone 17"
                   required
-                >
-                  <option value="">— seleccionar —</option>
-                  {stock.map((s) => (
-                    <option key={s.id} value={s.nombre}>{s.nombre}</option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="form-group">
                 <label>Cantidad</label>
@@ -143,6 +165,20 @@ function Compras() {
                 <input type="number" value={form.costoUnit} onChange={(e) => setForm({ ...form, costoUnit: e.target.value })} required />
               </div>
               <div className="form-group">
+                <label>Moneda</label>
+                <select value={form.moneda} onChange={(e) => setForm({ ...form, moneda: e.target.value })}>
+                  <option value="ARS">Pesos (ARS)</option>
+                  <option value="USD">Dólares (USD)</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Medio de pago</label>
+                <select value={form.medio} onChange={(e) => setForm({ ...form, medio: e.target.value })}>
+                  <option value="Transferencia">Transferencia</option>
+                  <option value="Efectivo">Efectivo</option>
+                </select>
+              </div>
+              <div className="form-group">
                 <label>Estado pago</label>
                 <select value={form.pago} onChange={(e) => setForm({ ...form, pago: e.target.value })}>
                   <option value="pagado">Pagado</option>
@@ -151,9 +187,16 @@ function Compras() {
               </div>
             </div>
             <div className="total-preview">
-              Total: <strong>{fmt(Number(form.cantidad) * Number(form.costoUnit))}</strong>
+              Total: <strong>{fmt(Number(form.cantidad) * Number(form.costoUnit), form.moneda)}</strong>
             </div>
-            <button type="submit" className="btn-primary">Guardar compra</button>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button type="submit" className="btn-primary">
+                {editando ? "Guardar cambios" : "Guardar compra"}
+              </button>
+              <button type="button" className="btn-secondary" onClick={cancelar}>
+                Cancelar
+              </button>
+            </div>
           </form>
         </div>
       )}
@@ -186,7 +229,15 @@ function Compras() {
               <option value="pendiente">Pendiente</option>
             </select>
           </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", proveedor: "", pago: "" })}>
+          <div className="form-group">
+            <label>Moneda</label>
+            <select value={filtros.moneda} onChange={(e) => setFiltros({ ...filtros, moneda: e.target.value })}>
+              <option value="">Todas</option>
+              <option value="ARS">Pesos</option>
+              <option value="USD">Dólares</option>
+            </select>
+          </div>
+          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", proveedor: "", pago: "", moneda: "" })}>
             Limpiar
           </button>
         </div>
@@ -198,7 +249,8 @@ function Compras() {
             <thead>
               <tr>
                 <th>Fecha</th><th>Proveedor</th><th>Producto</th>
-                <th>Cant.</th><th>Costo unit.</th><th>Total</th><th>Pago</th><th>Acciones</th>
+                <th>Cant.</th><th>Costo unit.</th><th>Total</th>
+                <th>Moneda</th><th>Medio</th><th>Pago</th><th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -208,17 +260,22 @@ function Compras() {
                   <td>{c.proveedorNombre}</td>
                   <td>{c.producto}</td>
                   <td>{c.cantidad}</td>
-                  <td>{fmt(c.costoUnit)}</td>
-                  <td>{fmt(c.total)}</td>
+                  <td>{fmt(c.costoUnit, c.moneda)}</td>
+                  <td>{fmt(c.total, c.moneda)}</td>
+                  <td><span className={`badge badge-${c.moneda === "USD" ? "blue" : "green"}`}>{c.moneda}</span></td>
+                  <td>{c.medio}</td>
                   <td>
                     <span className={`badge badge-${c.pago === "pagado" ? "green" : "red"}`}>
                       {c.pago}
                     </span>
                   </td>
                   <td>
-                    {c.pago !== "pagado" && (
-                      <button className="btn-xs" onClick={() => marcarPagado(c.id)}>✓ Pagado</button>
-                    )}
+                    <div className="action-btns">
+                      <button className="btn-xs" onClick={() => abrirEditar(c)}>✏️ Editar</button>
+                      {c.pago !== "pagado" && (
+                        <button className="btn-xs" onClick={() => marcarPagado(c.id)}>✓ Pagado</button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -226,9 +283,10 @@ function Compras() {
           </table>
         </div>
         <div className="table-footer">
-          <span>Total: <strong>{fmt(totalFiltrado)}</strong></span>
-          <span>Pagado: <strong style={{ color: "#1D9E75" }}>{fmt(pagadoFiltrado)}</strong></span>
-          <span>Adeudado: <strong style={{ color: "#A32D2D" }}>{fmt(totalFiltrado - pagadoFiltrado)}</strong></span>
+          <span>ARS: <strong>{fmt(totalARS, "ARS")}</strong></span>
+          <span>Pagado ARS: <strong style={{ color: "#1D9E75" }}>{fmt(pagadoARS, "ARS")}</strong></span>
+          <span>USD: <strong>{fmt(totalUSD, "USD")}</strong></span>
+          <span>Pagado USD: <strong style={{ color: "#1D9E75" }}>{fmt(pagadoUSD, "USD")}</strong></span>
         </div>
       </div>
     </div>
