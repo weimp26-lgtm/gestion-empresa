@@ -39,14 +39,20 @@ function Dashboard() {
     compras.filter(c => monedaFiltro === "USD" ? c.moneda === "USD" : c.moneda !== "USD").forEach((c) => {
       const nombre = c.producto?.trim();
       if (!nombre) return;
-      if (!productos[nombre]) productos[nombre] = { comprado: 0, costoTotal: 0, vendido: 0, ingresoTotal: 0 };
-      productos[nombre].comprado += Number(c.cantidad || 0);
-      productos[nombre].costoTotal += Number(c.cantidad || 0) * Number(c.costoUnit || 0);
+      const costoUnitReal = Number(c.costoUnit || c.costo || 0);
+      const cantidadReal = Number(c.cantidad || 0);
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, costoTotal: 0, vendido: 0, ingresoTotal: 0, costoUnit: 0, ultimaCompra: "" };
+      productos[nombre].comprado += cantidadReal;
+      productos[nombre].costoTotal += cantidadReal * costoUnitReal;
+      if ((c.fecha || "") >= productos[nombre].ultimaCompra) {
+        productos[nombre].ultimaCompra = c.fecha || "";
+        productos[nombre].costoUnit = costoUnitReal;
+      }
     });
     ventasReales.filter(v => monedaFiltro === "USD" ? v.moneda === "USD" : v.moneda !== "USD").forEach((v) => {
       const nombre = v.producto?.trim();
       if (!nombre) return;
-      if (!productos[nombre]) productos[nombre] = { comprado: 0, costoTotal: 0, vendido: 0, ingresoTotal: 0 };
+      if (!productos[nombre]) productos[nombre] = { comprado: 0, costoTotal: 0, vendido: 0, ingresoTotal: 0, costoUnit: 0, ultimaCompra: "" };
       productos[nombre].vendido += Number(v.cantidad || 0);
       productos[nombre].ingresoTotal += Number(v.total || 0);
     });
