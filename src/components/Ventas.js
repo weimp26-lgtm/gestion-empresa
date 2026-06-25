@@ -58,12 +58,9 @@ function Ventas() {
     return simbolo + Number(n || 0).toLocaleString("es-AR");
   };
 
-  const ventasOrdenadas = [...ventas].sort((a, b) =>
-    (a.fecha || "").localeCompare(b.fecha || "")
-  );
   const getOrden = (id) => {
-    const idx = ventasOrdenadas.findIndex(v => v.id === id);
-    return idx >= 0 ? idx + 1 : 0;
+    const v = ventas.find(x => x.id === id);
+    return v?.nOrden || "—";
   };
 
   const toggleOrden = (campo) => {
@@ -151,7 +148,7 @@ function Ventas() {
 
   const ventasOrdenadasyFiltradas = [...ventasFiltradas].sort((a, b) => {
     const dir = orden.dir === "asc" ? 1 : -1;
-    if (orden.campo === "orden") return (getOrden(a.id) - getOrden(b.id)) * dir;
+    if (orden.campo === "orden") return ((a.nOrden || 0) - (b.nOrden || 0)) * dir;
     if (orden.campo === "fecha") return (a.fecha || "").localeCompare(b.fecha || "") * dir;
     if (orden.campo === "fechaEntrega") return (a.fechaEntrega || "").localeCompare(b.fechaEntrega || "") * dir;
     if (orden.campo === "cliente") return (a.cliente || "").localeCompare(b.cliente || "") * dir;
@@ -218,7 +215,8 @@ function Ventas() {
     if (editando) {
       await updateDoc(doc(db, "ventas", editando), datos);
     } else {
-      await addDoc(collection(db, "ventas"), datos);
+      const maxOrden = ventas.reduce((max, v) => Math.max(max, v.nOrden || 0), 0);
+      await addDoc(collection(db, "ventas"), { ...datos, nOrden: maxOrden + 1 });
     }
     cancelar();
   };
@@ -287,7 +285,9 @@ function Ventas() {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Orden #{getOrden(verDetalle.id)} — Detalle</h3>
+              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>
+                {verDetalle.nOrden ? `Orden #${verDetalle.nOrden}` : "Detalle de venta"}
+              </h3>
               <button className="btn-secondary" onClick={() => setVerDetalle(null)}>✕ Cerrar</button>
             </div>
 
@@ -547,7 +547,6 @@ function Ventas() {
         </div>
       )}
 
-      {/* Filtros */}
       <div className="card">
         <h3 className="card-title">Filtros</h3>
         <div className="filters">
@@ -618,7 +617,6 @@ function Ventas() {
         </div>
       </div>
 
-      {/* Tabla */}
       <div className="card">
         <div className="table-wrap">
           <table>
@@ -644,7 +642,7 @@ function Ventas() {
             <tbody>
               {ventasOrdenadasyFiltradas.map((v) => (
                 <tr key={v.id} style={v.estafa ? { background: "#FFF5F5" } : {}}>
-                  <td style={{ color: "#888", fontWeight: 500 }}>#{getOrden(v.id)}</td>
+                  <td style={{ color: "#888", fontWeight: 500 }}>{v.nOrden ? `#${v.nOrden}` : "—"}</td>
                   <td>{v.fecha}</td>
                   <td>{v.fechaEntrega || "—"}</td>
                   <td>
