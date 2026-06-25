@@ -16,7 +16,7 @@ function Ventas() {
   const [verDetalle, setVerDetalle] = useState(null);
   const [orden, setOrden] = useState({ campo: "orden", dir: "asc" });
   const [filtros, setFiltros] = useState({
-    desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "",
+    desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "", moneda: "",
   });
 
   const formVacio = {
@@ -74,9 +74,7 @@ function Ventas() {
   };
 
   const OrdenFlecha = ({ campo }) => (
-    <span
-      style={{ cursor: "pointer", marginLeft: "4px", opacity: orden.campo === campo ? 1 : 0.3, fontSize: "10px" }}
-    >
+    <span style={{ cursor: "pointer", marginLeft: "4px", opacity: orden.campo === campo ? 1 : 0.3, fontSize: "10px" }}>
       {orden.campo === campo && orden.dir === "desc" ? "▼" : "▲"}
     </span>
   );
@@ -147,6 +145,7 @@ function Ventas() {
     if (filtros.estafa === "si" && !v.estafa) return false;
     if (filtros.estafa === "no" && v.estafa) return false;
     if (filtros.vendedor && !v.vendedor?.toLowerCase().includes(filtros.vendedor.toLowerCase())) return false;
+    if (filtros.moneda && v.moneda !== filtros.moneda) return false;
     return true;
   });
 
@@ -327,15 +326,15 @@ function Ventas() {
             <FilaDetalle label="Medio de pago" value={verDetalle.medio} />
             <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
               <span style={{ fontSize: "12px", color: "#888" }}>Estado cobro</span>
-              <span className={`badge badge-${badgePago(verDetalle.pago)}`}>{verDetalle.pago}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "0.5px solid #e0dfd8" }}>
-              <span style={{ fontSize: "12px", color: "#888" }}>Estado entrega</span>
-              <span className={`badge badge-${verDetalle.entrega === "entregado" ? "green" : verDetalle.entrega === "programado" ? "blue" : "amber"}`}>{verDetalle.entrega}</span>
+              <span className={`badge badge-${verDetalle.estafa ? "red" : badgePago(verDetalle.pago)}`}>
+                {verDetalle.estafa ? "estafa" : verDetalle.pago}
+              </span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: verDetalle.notas ? "0.5px solid #e0dfd8" : "none" }}>
-              <span style={{ fontSize: "12px", color: "#888" }}>Estafa</span>
-              <span className={`badge badge-${verDetalle.estafa ? "red" : "green"}`}>{verDetalle.estafa ? "🚨 Sí" : "No"}</span>
+              <span style={{ fontSize: "12px", color: "#888" }}>Estado entrega</span>
+              <span className={`badge badge-${verDetalle.estafa ? "red" : verDetalle.entrega === "entregado" ? "green" : verDetalle.entrega === "programado" ? "blue" : "amber"}`}>
+                {verDetalle.estafa ? "estafa" : verDetalle.entrega}
+              </span>
             </div>
 
             {verDetalle.notas && (
@@ -598,6 +597,14 @@ function Ventas() {
             </select>
           </div>
           <div className="form-group">
+            <label>Moneda</label>
+            <select value={filtros.moneda} onChange={(e) => setFiltros({ ...filtros, moneda: e.target.value })}>
+              <option value="">Todas</option>
+              <option value="ARS">Pesos (ARS)</option>
+              <option value="USD">Dólares (USD)</option>
+            </select>
+          </div>
+          <div className="form-group">
             <label>Estafa</label>
             <select value={filtros.estafa} onChange={(e) => setFiltros({ ...filtros, estafa: e.target.value })}>
               <option value="">Todas</option>
@@ -605,7 +612,7 @@ function Ventas() {
               <option value="si">Solo estafas</option>
             </select>
           </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "" })}>
+          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "", moneda: "" })}>
             Limpiar
           </button>
         </div>
@@ -667,8 +674,18 @@ function Ventas() {
                       <span style={{ fontSize: "11px", color: "#888" }}>—</span>
                     )}
                   </td>
-                  <td><span className={`badge badge-${v.entrega === "entregado" ? "green" : v.entrega === "programado" ? "blue" : "amber"}`}>{v.entrega}</span></td>
-                  <td><span className={`badge badge-${badgePago(v.pago)}`}>{v.pago}</span></td>
+                  <td>
+                    {v.estafa
+                      ? <span className="badge badge-red">estafa</span>
+                      : <span className={`badge badge-${v.entrega === "entregado" ? "green" : v.entrega === "programado" ? "blue" : "amber"}`}>{v.entrega}</span>
+                    }
+                  </td>
+                  <td>
+                    {v.estafa
+                      ? <span className="badge badge-red">estafa</span>
+                      : <span className={`badge badge-${badgePago(v.pago)}`}>{v.pago}</span>
+                    }
+                  </td>
                   <td>{v.medio}</td>
                   <td>
                     <div className="action-btns">
