@@ -58,10 +58,7 @@ function Ventas() {
     return simbolo + Number(n || 0).toLocaleString("es-AR");
   };
 
-  const getOrden = (id) => {
-    const v = ventas.find(x => x.id === id);
-    return v?.nOrden || "—";
-  };
+  
 
   const toggleOrden = (campo) => {
     setOrden(prev => ({
