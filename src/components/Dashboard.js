@@ -33,7 +33,6 @@ function Dashboard() {
   const deudaProvARS = compras.filter(c => c.pago === "pendiente" && c.moneda !== "USD").reduce((a, c) => a + (c.total || 0), 0);
   const deudaProvUSD = compras.filter(c => c.pago === "pendiente" && c.moneda === "USD").reduce((a, c) => a + (c.total || 0), 0);
 
-  // Calcular por producto separado ARS y USD
   const calcularProductos = (monedaFiltro) => {
     const productos = {};
     compras.filter(c => monedaFiltro === "USD" ? c.moneda === "USD" : c.moneda !== "USD").forEach((c) => {
@@ -63,7 +62,8 @@ function Dashboard() {
       const ganancia = d.ingresoTotal - costoVendido;
       const margen = d.ingresoTotal > 0 ? Math.round((ganancia / d.ingresoTotal) * 100) : 0;
       const precioVentaProm = d.vendido > 0 ? d.ingresoTotal / d.vendido : 0;
-      return { nombre, ...d, costoUnit, stockActual, costoVendido, ganancia, margen, precioVentaProm };
+      const valorStock = stockActual > 0 ? stockActual * costoUnit : 0;
+      return { nombre, ...d, costoUnit, stockActual, costoVendido, ganancia, margen, precioVentaProm, valorStock };
     });
   };
 
@@ -73,16 +73,20 @@ function Dashboard() {
   const totalCostoVendidoARS = productosARS.reduce((a, p) => a + p.costoVendido, 0);
   const gananciaRealARS = totalVentasARS - totalCostoVendidoARS;
   const margenARS = totalVentasARS > 0 ? Math.round((gananciaRealARS / totalVentasARS) * 100) : 0;
-  const totalInvertidoStockARS = productosARS.reduce((a, p) => a + (p.stockActual > 0 ? p.stockActual * p.costoUnit : 0), 0);
+  const totalInvertidoStockARS = productosARS.reduce((a, p) => a + p.valorStock, 0);
 
   const totalCostoVendidoUSD = productosUSD.reduce((a, p) => a + p.costoVendido, 0);
   const gananciaRealUSD = totalVentasUSD - totalCostoVendidoUSD;
   const margenUSD = totalVentasUSD > 0 ? Math.round((gananciaRealUSD / totalVentasUSD) * 100) : 0;
-  const totalInvertidoStockUSD = productosUSD.reduce((a, p) => a + (p.stockActual > 0 ? p.stockActual * p.costoUnit : 0), 0);
+  const totalInvertidoStockUSD = productosUSD.reduce((a, p) => a + p.valorStock, 0);
 
-  const stockCritico = [...productosARS, ...productosUSD].filter((p, i, arr) =>
-    p.stockActual <= 3 && p.stockActual >= 0 && arr.findIndex(x => x.nombre === p.nombre) === i
-  );
+  // Stock crítico — todos los productos
+  const todosProductos = [...productosARS, ...productosUSD].reduce((acc, p) => {
+    const existe = acc.find(x => x.nombre === p.nombre);
+    if (!existe) acc.push(p);
+    return acc;
+  }, []);
+  const stockCritico = todosProductos.filter(p => p.stockActual <= 3 && p.stockActual >= 0);
 
   const cantEstafas = ventas.filter(v => v.estafa).length;
   const totalEstafasARS = ventas.filter(v => v.estafa && v.moneda !== "USD").reduce((a, v) => a + (v.total || 0), 0);
@@ -124,8 +128,8 @@ function Dashboard() {
     <div className="section">
       <h2 className="section-title">Dashboard</h2>
 
-      {/* Métricas rápidas */}
-      <div className="metrics-grid">
+      {/* Métricas principales — 2 filas */}
+      <div className="metrics-grid" style={{ marginBottom: "0.5rem" }}>
         <div className="metric-card">
           <p className="metric-label">Ventas ARS</p>
           <p className="metric-value" style={{ color: "#185FA5" }}>{fmtARS(totalVentasARS)}</p>
@@ -135,25 +139,66 @@ function Dashboard() {
           <p className="metric-value" style={{ color: "#185FA5" }}>{fmtUSD(totalVentasUSD)}</p>
         </div>
         <div className="metric-card">
-          <p className="metric-label">Cobrado ARS</p>
-          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmtARS(cobradoARS)}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Cobrado USD</p>
-          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmtUSD(cobradoUSD)}</p>
-        </div>
-        <div className="metric-card">
           <p className="metric-label">Entregas pendientes</p>
           <p className="metric-value" style={{ color: pendEntrega > 3 ? "#A32D2D" : "#BA7517" }}>{pendEntrega}</p>
         </div>
         <div className="metric-card">
-          <p className="metric-label">Deuda proveedores</p>
-          <p className="metric-value" style={{ color: "#A32D2D", fontSize: "14px" }}>
-            {deudaProvARS > 0 && fmtARS(deudaProvARS)}{deudaProvARS > 0 && deudaProvUSD > 0 && " / "}{deudaProvUSD > 0 && fmtUSD(deudaProvUSD)}
-            {deudaProvARS === 0 && deudaProvUSD === 0 && "$0"}
-          </p>
+          <p className="metric-label">Deuda proveedores ARS</p>
+          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmtARS(deudaProvARS)}</p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Cobros pendientes ARS</p>
+          <p className="metric-value" style={{ color: "#BA7517" }}>{fmtARS(pendCobroARS)}</p>
+        </div>
+        <div className="metric-card">
+          <p className="metric-label">Cobros pendientes USD</p>
+          <p className="metric-value" style={{ color: "#BA7517" }}>{fmtUSD(pendCobroUSD)}</p>
         </div>
       </div>
+
+      {/* Stock crítico mini recuadro */}
+      {stockCritico.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1rem" }}>
+          <div className="alert alert-red" style={{ borderRadius: "12px", padding: "0" }}>
+            <div style={{ padding: "10px 14px", borderBottom: "0.5px solid #F7C1C1" }}>
+              <strong style={{ fontSize: "12px" }}>⚠️ Stock crítico — {stockCritico.length} producto(s)</strong>
+            </div>
+            <div style={{ padding: "8px 14px" }}>
+              {stockCritico.map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: i < stockCritico.length - 1 ? "0.5px solid #F7C1C1" : "none" }}>
+                  <span style={{ fontSize: "12px", color: "#A32D2D" }}>{s.nombre}</span>
+                  <span className="badge badge-red">{s.stockActual} {s.stockActual === 1 ? "unidad" : "unidades"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Alertas estafas si hay */}
+          {cantEstafas > 0 && (
+            <div className="alert alert-red" style={{ borderRadius: "12px" }}>
+              🚨 {cantEstafas} venta(s) marcada(s) como estafa<br />
+              {totalEstafasARS > 0 && <span>{fmtARS(totalEstafasARS)} en riesgo</span>}
+              {totalEstafasUSD > 0 && <span> / {fmtUSD(totalEstafasUSD)} en riesgo</span>}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Alerta estafas si no hay stock crítico */}
+      {stockCritico.length === 0 && cantEstafas > 0 && (
+        <div className="alert alert-red" style={{ marginBottom: "1rem" }}>
+          🚨 {cantEstafas} venta(s) marcada(s) como estafa —
+          {totalEstafasARS > 0 && ` ${fmtARS(totalEstafasARS)}`}
+          {totalEstafasUSD > 0 && ` / ${fmtUSD(totalEstafasUSD)}`} en riesgo
+        </div>
+      )}
+
+      {/* Deuda proveedores alerta */}
+      {(deudaProvARS > 0 || deudaProvUSD > 0) && (
+        <div className="alert alert-amber" style={{ marginBottom: "1rem" }}>
+          ⚠️ Deuda con proveedores: {deudaProvARS > 0 && fmtARS(deudaProvARS)} {deudaProvUSD > 0 && fmtUSD(deudaProvUSD)}
+        </div>
+      )}
 
       {/* Balance ARS */}
       <div className="card" style={{ borderLeft: "3px solid #1D9E75", marginBottom: "1rem" }}>
@@ -180,7 +225,7 @@ function Dashboard() {
             <p style={{ fontSize: "18px", fontWeight: 500, color: "#185FA5" }}>{fmtARS(totalInvertidoStockARS)}</p>
           </div>
           <div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Por cobrar</p>
+            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Por cobrar ARS</p>
             <p style={{ fontSize: "18px", fontWeight: 500, color: "#BA7517" }}>{fmtARS(pendCobroARS)}</p>
           </div>
         </div>
@@ -217,7 +262,7 @@ function Dashboard() {
             <p style={{ fontSize: "18px", fontWeight: 500, color: "#185FA5" }}>{fmtUSD(totalInvertidoStockUSD)}</p>
           </div>
           <div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Por cobrar</p>
+            <p style={{ fontSize: "12px", color: "#888", marginBottom: "4px" }}>Por cobrar USD</p>
             <p style={{ fontSize: "18px", fontWeight: 500, color: "#BA7517" }}>{fmtUSD(pendCobroUSD)}</p>
           </div>
         </div>
@@ -228,23 +273,6 @@ function Dashboard() {
           </div>
         )}
       </div>
-
-      {/* Alertas */}
-      {stockCritico.length > 0 && (
-        <div className="alert alert-red">
-          ⚠️ Stock crítico: {stockCritico.map(s => s.nombre).join(", ")}
-        </div>
-      )}
-      {(deudaProvARS > 0 || deudaProvUSD > 0) && (
-        <div className="alert alert-amber">
-          ⚠️ Deuda con proveedores: {deudaProvARS > 0 && fmtARS(deudaProvARS)} {deudaProvUSD > 0 && fmtUSD(deudaProvUSD)}
-        </div>
-      )}
-      {cantEstafas > 0 && (
-        <div className="alert alert-red">
-          🚨 {cantEstafas} venta(s) marcada(s) como estafa — {totalEstafasARS > 0 && fmtARS(totalEstafasARS)} {totalEstafasUSD > 0 && fmtUSD(totalEstafasUSD)} en riesgo
-        </div>
-      )}
 
       {/* Pendientes */}
       <div className="two-col">
