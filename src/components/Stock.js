@@ -30,6 +30,8 @@ function Stock() {
     compras.forEach((c) => {
       const nombre = c.producto?.trim();
       if (!nombre) return;
+      const costoUnitReal = Number(c.costoUnit || c.costo || 0);
+      const cantidadReal = Number(c.cantidad || 0);
       if (!productos[nombre]) {
         productos[nombre] = {
           nombre,
@@ -42,13 +44,13 @@ function Stock() {
           ultimaCompra: c.fecha || "",
         };
       }
-      productos[nombre].comprado += Number(c.cantidad || 0);
-      productos[nombre].costoTotal += Number(c.cantidad || 0) * Number(c.costoUnit || 0);
+      productos[nombre].comprado += cantidadReal;
+      productos[nombre].costoTotal += cantidadReal * costoUnitReal;
       productos[nombre].moneda = c.moneda || "ARS";
       productos[nombre].proveedor = c.proveedorNombre || "—";
-      if (c.fecha > productos[nombre].ultimaCompra) {
+      if (c.fecha >= productos[nombre].ultimaCompra) {
         productos[nombre].ultimaCompra = c.fecha;
-        productos[nombre].costoUnit = Number(c.costoUnit || 0);
+        productos[nombre].costoUnit = costoUnitReal;
       }
     });
 
