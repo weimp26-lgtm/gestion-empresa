@@ -14,6 +14,7 @@ function Ventas() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [editando, setEditando] = useState(null);
   const [verDetalle, setVerDetalle] = useState(null);
+  const [orden, setOrden] = useState({ campo: "orden", dir: "asc" });
   const [filtros, setFiltros] = useState({
     desde: "", hasta: "", cliente: "", pago: "", entrega: "", medio: "", estafa: "", vendedor: "",
   });
@@ -57,16 +58,28 @@ function Ventas() {
     return simbolo + Number(n || 0).toLocaleString("es-AR");
   };
 
-  // Número de orden — basado en fecha de creación ordenada
-  const ventasOrdenadas = [...ventas].sort((a, b) => {
-    const fa = a.fecha || "";
-    const fb = b.fecha || "";
-    return fa.localeCompare(fb);
-  });
+  const ventasOrdenadas = [...ventas].sort((a, b) =>
+    (a.fecha || "").localeCompare(b.fecha || "")
+  );
   const getOrden = (id) => {
     const idx = ventasOrdenadas.findIndex(v => v.id === id);
-    return idx >= 0 ? idx + 1 : "—";
+    return idx >= 0 ? idx + 1 : 0;
   };
+
+  const toggleOrden = (campo) => {
+    setOrden(prev => ({
+      campo,
+      dir: prev.campo === campo && prev.dir === "asc" ? "desc" : "asc"
+    }));
+  };
+
+  const OrdenFlecha = ({ campo }) => (
+    <span
+      style={{ cursor: "pointer", marginLeft: "4px", opacity: orden.campo === campo ? 1 : 0.3, fontSize: "10px" }}
+    >
+      {orden.campo === campo && orden.dir === "desc" ? "▼" : "▲"}
+    </span>
+  );
 
   const buscarClienteDuplicado = (campo, valor) => {
     if (!valor || valor.trim() === "") return null;
@@ -135,6 +148,20 @@ function Ventas() {
     if (filtros.estafa === "no" && v.estafa) return false;
     if (filtros.vendedor && !v.vendedor?.toLowerCase().includes(filtros.vendedor.toLowerCase())) return false;
     return true;
+  });
+
+  const ventasOrdenadasyFiltradas = [...ventasFiltradas].sort((a, b) => {
+    const dir = orden.dir === "asc" ? 1 : -1;
+    if (orden.campo === "orden") return (getOrden(a.id) - getOrden(b.id)) * dir;
+    if (orden.campo === "fecha") return (a.fecha || "").localeCompare(b.fecha || "") * dir;
+    if (orden.campo === "fechaEntrega") return (a.fechaEntrega || "").localeCompare(b.fechaEntrega || "") * dir;
+    if (orden.campo === "cliente") return (a.cliente || "").localeCompare(b.cliente || "") * dir;
+    if (orden.campo === "vendedor") return (a.vendedor || "").localeCompare(b.vendedor || "") * dir;
+    if (orden.campo === "producto") return (a.producto || "").localeCompare(b.producto || "") * dir;
+    if (orden.campo === "total") return ((a.total || 0) - (b.total || 0)) * dir;
+    if (orden.campo === "entrega") return (a.entrega || "").localeCompare(b.entrega || "") * dir;
+    if (orden.campo === "pago") return (a.pago || "").localeCompare(b.pago || "") * dir;
+    return 0;
   });
 
   const totalFiltradoARS = ventasFiltradas.filter(v => !v.estafa && v.moneda !== "USD").reduce((a, v) => a + (v.total || 0), 0);
@@ -251,7 +278,6 @@ function Ventas() {
         </div>
       )}
 
-      {/* Modal detalle */}
       {verDetalle && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
@@ -262,9 +288,7 @@ function Ventas() {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>
-                Orden #{getOrden(verDetalle.id)} — Detalle de venta
-              </h3>
+              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Orden #{getOrden(verDetalle.id)} — Detalle</h3>
               <button className="btn-secondary" onClick={() => setVerDetalle(null)}>✕ Cerrar</button>
             </div>
 
@@ -338,7 +362,6 @@ function Ventas() {
         </div>
       )}
 
-      {/* Formulario */}
       {mostrarForm && (
         <div className="card">
           <h3 className="card-title">{editando ? "Editar venta" : "Registrar venta"}</h3>
@@ -507,25 +530,13 @@ function Ventas() {
               </div>
             </div>
 
-            {/* Notas */}
             <div style={{ marginBottom: "12px" }}>
               <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "8px" }}>Notas (opcional)</p>
               <textarea
                 value={form.notas}
                 onChange={(e) => setForm({ ...form, notas: e.target.value })}
                 placeholder="Agregá cualquier información adicional sobre esta venta..."
-                style={{
-                  width: "100%",
-                  minHeight: "80px",
-                  padding: "8px 10px",
-                  border: "0.5px solid #e0dfd8",
-                  borderRadius: "8px",
-                  fontSize: "13px",
-                  fontFamily: "inherit",
-                  resize: "vertical",
-                  background: "white",
-                  color: "#1a1a1a",
-                }}
+                style={{ width: "100%", minHeight: "80px", padding: "8px 10px", border: "0.5px solid #e0dfd8", borderRadius: "8px", fontSize: "13px", fontFamily: "inherit", resize: "vertical", background: "white", color: "#1a1a1a" }}
               />
             </div>
 
@@ -606,13 +617,25 @@ function Ventas() {
           <table>
             <thead>
               <tr>
-                <th>#</th><th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
-                <th>Teléfono</th><th>Vendedor</th><th>Producto</th><th>Cant.</th>
-                <th>Total</th><th>Moneda</th><th>Detalle precio</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
+                <th onClick={() => toggleOrden("orden")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}># <OrdenFlecha campo="orden" /></th>
+                <th onClick={() => toggleOrden("fecha")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Fecha venta <OrdenFlecha campo="fecha" /></th>
+                <th onClick={() => toggleOrden("fechaEntrega")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Fecha entrega <OrdenFlecha campo="fechaEntrega" /></th>
+                <th onClick={() => toggleOrden("cliente")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Cliente <OrdenFlecha campo="cliente" /></th>
+                <th>Teléfono</th>
+                <th onClick={() => toggleOrden("vendedor")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Vendedor <OrdenFlecha campo="vendedor" /></th>
+                <th onClick={() => toggleOrden("producto")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Producto <OrdenFlecha campo="producto" /></th>
+                <th>Cant.</th>
+                <th onClick={() => toggleOrden("total")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Total <OrdenFlecha campo="total" /></th>
+                <th>Moneda</th>
+                <th>Detalle precio</th>
+                <th onClick={() => toggleOrden("entrega")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Entrega <OrdenFlecha campo="entrega" /></th>
+                <th onClick={() => toggleOrden("pago")} style={{ cursor: "pointer", whiteSpace: "nowrap" }}>Cobro <OrdenFlecha campo="pago" /></th>
+                <th>Medio</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {[...ventasFiltradas].reverse().map((v) => (
+              {ventasOrdenadasyFiltradas.map((v) => (
                 <tr key={v.id} style={v.estafa ? { background: "#FFF5F5" } : {}}>
                   <td style={{ color: "#888", fontWeight: 500 }}>#{getOrden(v.id)}</td>
                   <td>{v.fecha}</td>
