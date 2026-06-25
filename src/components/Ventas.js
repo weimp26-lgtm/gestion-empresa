@@ -37,6 +37,7 @@ function Ventas() {
     notaEstafa: "",
     precioUSD: "",
     tipoCambio: "",
+    notas: "",
   };
 
   const [form, setForm] = useState(formVacio);
@@ -54,6 +55,17 @@ function Ventas() {
   const fmt = (n, moneda) => {
     const simbolo = moneda === "USD" ? "USD " : "$";
     return simbolo + Number(n || 0).toLocaleString("es-AR");
+  };
+
+  // Número de orden — basado en fecha de creación ordenada
+  const ventasOrdenadas = [...ventas].sort((a, b) => {
+    const fa = a.fecha || "";
+    const fb = b.fecha || "";
+    return fa.localeCompare(fb);
+  });
+  const getOrden = (id) => {
+    const idx = ventasOrdenadas.findIndex(v => v.id === id);
+    return idx >= 0 ? idx + 1 : "—";
   };
 
   const buscarClienteDuplicado = (campo, valor) => {
@@ -105,7 +117,6 @@ function Ventas() {
 
   const stockDisponible = calcularStock();
 
-  // Si moneda es ARS y hay precioUSD + TC → convierte. Si no → precio normal
   const calcularTotalVenta = (f) => {
     if (f.moneda === "ARS" && f.precioUSD && f.tipoCambio) {
       return Number(f.precioUSD) * Number(f.cantidad) * Number(f.tipoCambio);
@@ -155,6 +166,7 @@ function Ventas() {
       notaEstafa: v.notaEstafa || "",
       precioUSD: v.precioUSD || "",
       tipoCambio: v.tipoCambio || "",
+      notas: v.notas || "",
     });
     setMostrarForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -176,12 +188,7 @@ function Ventas() {
         return;
       }
     }
-    const datos = {
-      ...form,
-      total,
-      cantidad: Number(form.cantidad),
-      precio: Number(form.precio),
-    };
+    const datos = { ...form, total, cantidad: Number(form.cantidad), precio: Number(form.precio) };
     if (editando) {
       await updateDoc(doc(db, "ventas", editando), datos);
     } else {
@@ -244,6 +251,7 @@ function Ventas() {
         </div>
       )}
 
+      {/* Modal detalle */}
       {verDetalle && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}
@@ -254,7 +262,9 @@ function Ventas() {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>Detalle de venta</h3>
+              <h3 style={{ fontSize: "16px", fontWeight: 500 }}>
+                Orden #{getOrden(verDetalle.id)} — Detalle de venta
+              </h3>
               <button className="btn-secondary" onClick={() => setVerDetalle(null)}>✕ Cerrar</button>
             </div>
 
@@ -299,10 +309,19 @@ function Ventas() {
               <span style={{ fontSize: "12px", color: "#888" }}>Estado entrega</span>
               <span className={`badge badge-${verDetalle.entrega === "entregado" ? "green" : verDetalle.entrega === "programado" ? "blue" : "amber"}`}>{verDetalle.entrega}</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: verDetalle.notas ? "0.5px solid #e0dfd8" : "none" }}>
               <span style={{ fontSize: "12px", color: "#888" }}>Estafa</span>
               <span className={`badge badge-${verDetalle.estafa ? "red" : "green"}`}>{verDetalle.estafa ? "🚨 Sí" : "No"}</span>
             </div>
+
+            {verDetalle.notas && (
+              <div style={{ marginTop: "12px" }}>
+                <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "6px" }}>Notas</p>
+                <div style={{ background: "#f9f9f7", borderRadius: "8px", padding: "10px 12px", fontSize: "13px", color: "#1a1a1a", lineHeight: "1.5" }}>
+                  {verDetalle.notas}
+                </div>
+              </div>
+            )}
 
             <div style={{ marginTop: "1rem", display: "flex", gap: "8px" }}>
               <button className="btn-primary" onClick={() => abrirEditar(verDetalle)}>✏️ Editar</button>
@@ -319,6 +338,7 @@ function Ventas() {
         </div>
       )}
 
+      {/* Formulario */}
       {mostrarForm && (
         <div className="card">
           <h3 className="card-title">{editando ? "Editar venta" : "Registrar venta"}</h3>
@@ -407,7 +427,6 @@ function Ventas() {
                 </select>
               </div>
 
-              {/* Si moneda ARS → mostrar conversor USD a ARS */}
               {form.moneda === "ARS" ? (
                 <>
                   <div className="form-group">
@@ -442,7 +461,6 @@ function Ventas() {
                   )}
                 </>
               ) : (
-                /* Si moneda USD → precio directo en USD */
                 <div className="form-group">
                   <label>Precio en USD</label>
                   <input
@@ -487,6 +505,28 @@ function Ventas() {
                   <span>Total: <strong>{fmt(Number(form.cantidad) * Number(form.precio), form.moneda)}</strong></span>
                 )}
               </div>
+            </div>
+
+            {/* Notas */}
+            <div style={{ marginBottom: "12px" }}>
+              <p style={{ fontSize: "11px", color: "#888", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: "8px" }}>Notas (opcional)</p>
+              <textarea
+                value={form.notas}
+                onChange={(e) => setForm({ ...form, notas: e.target.value })}
+                placeholder="Agregá cualquier información adicional sobre esta venta..."
+                style={{
+                  width: "100%",
+                  minHeight: "80px",
+                  padding: "8px 10px",
+                  border: "0.5px solid #e0dfd8",
+                  borderRadius: "8px",
+                  fontSize: "13px",
+                  fontFamily: "inherit",
+                  resize: "vertical",
+                  background: "white",
+                  color: "#1a1a1a",
+                }}
+              />
             </div>
 
             <div style={{ display: "flex", gap: "8px" }}>
@@ -566,7 +606,7 @@ function Ventas() {
           <table>
             <thead>
               <tr>
-                <th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
+                <th>#</th><th>Fecha venta</th><th>Fecha entrega</th><th>Cliente</th>
                 <th>Teléfono</th><th>Vendedor</th><th>Producto</th><th>Cant.</th>
                 <th>Total</th><th>Moneda</th><th>Detalle precio</th><th>Entrega</th><th>Cobro</th><th>Medio</th><th>Acciones</th>
               </tr>
@@ -574,6 +614,7 @@ function Ventas() {
             <tbody>
               {[...ventasFiltradas].reverse().map((v) => (
                 <tr key={v.id} style={v.estafa ? { background: "#FFF5F5" } : {}}>
+                  <td style={{ color: "#888", fontWeight: 500 }}>#{getOrden(v.id)}</td>
                   <td>{v.fecha}</td>
                   <td>{v.fechaEntrega || "—"}</td>
                   <td>
@@ -587,7 +628,12 @@ function Ventas() {
                   <td>{v.vendedor || "—"}</td>
                   <td>{v.producto}</td>
                   <td>{v.cantidad}</td>
-                  <td><strong>{fmt(v.total, v.moneda)}</strong></td>
+                  <td>
+                    <div>
+                      <strong>{fmt(v.total, v.moneda)}</strong>
+                      {v.notas && <p style={{ fontSize: "11px", color: "#888", marginTop: "2px" }}>📝 Con notas</p>}
+                    </div>
+                  </td>
                   <td><span className={`badge badge-${v.moneda === "USD" ? "blue" : "green"}`}>{v.moneda || "ARS"}</span></td>
                   <td>
                     {v.moneda === "ARS" && v.precioUSD && v.tipoCambio ? (
