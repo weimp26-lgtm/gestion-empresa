@@ -25,8 +25,6 @@ function Dashboard() {
 
   const totalVentasARS = ventasARS.reduce((a, v) => a + (v.total || 0), 0);
   const totalVentasUSD = ventasUSD.reduce((a, v) => a + (v.total || 0), 0);
-  const cobradoARS = ventasARS.filter(v => v.pago === "cobrado").reduce((a, v) => a + (v.total || 0), 0);
-  const cobradoUSD = ventasUSD.filter(v => v.pago === "cobrado").reduce((a, v) => a + (v.total || 0), 0);
   const pendCobroARS = ventasARS.filter(v => v.pago !== "cobrado").reduce((a, v) => a + (v.total || 0), 0);
   const pendCobroUSD = ventasUSD.filter(v => v.pago !== "cobrado").reduce((a, v) => a + (v.total || 0), 0);
   const pendEntrega = ventasReales.filter(v => v.entrega !== "entregado").length;
