@@ -1,16 +1,30 @@
 import React, { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, onSnapshot, addDoc, updateDoc, doc } from "firebase/firestore";
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from "firebase/firestore";
+
+const CAJAS_FIJAS = [
+  { id: "ventas_compras_ars", nombre: "Ventas y Compras (Pesos)", auto: true, monedaFija: "ARS" },
+  { id: "ventas_compras_usd", nombre: "Ventas y Compras (USD)", auto: true, monedaFija: "USD" },
+  { id: "acreedores", nombre: "Acreedores" },
+  { id: "deudores", nombre: "Deudores" },
+  { id: "proveedores", nombre: "Proveedores" },
+  { id: "clientes", nombre: "Clientes" },
+];
 
 function Caja() {
   const [ventas, setVentas] = useState([]);
   const [compras, setCompras] = useState([]);
   const [movManuales, setMovManuales] = useState([]);
+  const [cajasCustom, setCajasCustom] = useState([]);
+
+  const [cajaSeleccionada, setCajaSeleccionada] = useState(null);
+  const [mostrarFormCaja, setMostrarFormCaja] = useState(false);
+  const [nombreNuevaCaja, setNombreNuevaCaja] = useState("");
+  const [subcajaDe, setSubcajaDe] = useState(null);
+  const [nombreNuevaSubcaja, setNombreNuevaSubcaja] = useState("");
+
   const [mostrarForm, setMostrarForm] = useState(false);
   const [editando, setEditando] = useState(null);
-  const [filtros, setFiltros] = useState({
-    desde: "", hasta: "", tipo: "", medio: "", moneda: "",
-  });
 
   const formVacio = {
     tipo: "ingreso",
@@ -20,8 +34,8 @@ function Caja() {
     responsable: "",
     motivo: "",
     fecha: new Date().toISOString().split("T")[0],
+    cajaId: "",
   };
-
   const [form, setForm] = useState(formVacio);
 
   useEffect(() => {
@@ -34,7 +48,10 @@ function Caja() {
     const unsubMov = onSnapshot(collection(db, "movimientos_caja"), (snap) => {
       setMovManuales(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
-    return () => { unsubVentas(); unsubCompras(); unsubMov(); };
+    const unsubCajas = onSnapshot(collection(db, "cajas"), (snap) => {
+      setCajasCustom(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => { unsubVentas(); unsubCompras(); unsubMov(); unsubCajas(); };
   }, []);
 
   const fmt = (n, moneda) => {
@@ -42,41 +59,19 @@ function Caja() {
     return simbolo + Number(n || 0).toLocaleString("es-AR");
   };
 
-  const guardarMovimiento = async (e) => {
-    e.preventDefault();
-    const datos = { ...form, monto: Number(form.monto) };
-    if (editando) {
-      await updateDoc(doc(db, "movimientos_caja", editando), datos);
-    } else {
-      await addDoc(collection(db, "movimientos_caja"), datos);
-    }
-    setMostrarForm(false);
-    setEditando(null);
-    setForm(formVacio);
-  };
+  const cajasTop = [...CAJAS_FIJAS, ...cajasCustom.filter((c) => !c.padreId)];
+  const getSubcajas = (padreId) => cajasCustom.filter((c) => c.padreId === padreId);
+  const getCajaPorId = (id) => CAJAS_FIJAS.find((c) => c.id === id) || cajasCustom.find((c) => c.id === id);
 
-  const abrirEditar = (m) => {
-    setEditando(m.id);
-    setForm({
-      tipo: m.tipo,
-      monto: m.monto,
-      moneda: m.moneda,
-      medio: m.medio,
-      responsable: m.responsable,
-      motivo: m.motivo,
-      fecha: m.fecha,
+  const flatCajasOptions = () => {
+    const opts = [];
+    cajasTop.forEach((c) => {
+      opts.push({ id: c.id, label: c.nombre });
+      getSubcajas(c.id).forEach((sub) => opts.push({ id: sub.id, label: `— ${sub.nombre}` }));
     });
-    setMostrarForm(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    return opts;
   };
 
-  const cancelar = () => {
-    setMostrarForm(false);
-    setEditando(null);
-    setForm(formVacio);
-  };
-
-  // Movimientos automáticos
   const movAutomaticos = [
     ...ventas.map((v) => ({
       fecha: v.fecha,
@@ -102,38 +97,98 @@ function Caja() {
     })),
   ].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || ""));
 
-  const movFiltrados = movAutomaticos.filter((m) => {
-    if (filtros.desde && m.fecha < filtros.desde) return false;
-    if (filtros.hasta && m.fecha > filtros.hasta) return false;
-    if (filtros.tipo && m.tipo !== filtros.tipo) return false;
-    if (filtros.medio && m.medio !== filtros.medio) return false;
-    if (filtros.moneda && m.moneda !== filtros.moneda) return false;
-    return true;
-  });
+  const movsManualesDeCaja = (cajaId) => movManuales.filter((m) => m.cajaId === cajaId);
+  const sinAsignar = movManuales.filter((m) => !m.cajaId);
 
-  // Métricas ventas/compras ARS
-  const ingresadosARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const egresadosARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const porCobrarARS = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const porPagarARS = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const estafasARS = movFiltrados.filter(m => m.estado === "pendiente/estafa" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
+  const balancePropio = (cajaId) => {
+    const movs = movsManualesDeCaja(cajaId);
+    const suma = (moneda) =>
+      movs.filter((m) => m.moneda === moneda && m.tipo === "ingreso").reduce((a, m) => a + Number(m.monto || 0), 0) -
+      movs.filter((m) => m.moneda === moneda && m.tipo === "egreso").reduce((a, m) => a + Number(m.monto || 0), 0);
+    return { ARS: suma("ARS"), USD: suma("USD") };
+  };
 
-  // Métricas ventas/compras USD
-  const ingresadosUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
-  const egresadosUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado === "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
-  const porCobrarUSD = movFiltrados.filter(m => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
-  const porPagarUSD = movFiltrados.filter(m => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
-  const estafasUSD = movFiltrados.filter(m => m.estado === "pendiente/estafa" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const balanceTotal = (cajaId) => {
+    const propio = balancePropio(cajaId);
+    const subcajas = getSubcajas(cajaId);
+    return subcajas.reduce((acc, sub) => {
+      const subBal = balanceTotal(sub.id);
+      return { ARS: acc.ARS + subBal.ARS, USD: acc.USD + subBal.USD };
+    }, propio);
+  };
 
-  // Métricas manuales
-  const manualIngARS = movManuales.filter(m => m.tipo === "ingreso" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const manualEgrARS = movManuales.filter(m => m.tipo === "egreso" && m.moneda !== "USD").reduce((a, m) => a + m.monto, 0);
-  const manualIngUSD = movManuales.filter(m => m.tipo === "ingreso" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
-  const manualEgrUSD = movManuales.filter(m => m.tipo === "egreso" && m.moneda === "USD").reduce((a, m) => a + m.monto, 0);
+  const balanceAuto = (moneda) => {
+    const ing = movAutomaticos.filter((m) => m.tipo === "ingreso" && m.estado === "cobrado" && m.moneda === moneda).reduce((a, m) => a + m.monto, 0);
+    const egr = movAutomaticos.filter((m) => m.tipo === "egreso" && m.estado === "pagado" && m.moneda === moneda).reduce((a, m) => a + m.monto, 0);
+    const cajaId = moneda === "ARS" ? "ventas_compras_ars" : "ventas_compras_usd";
+    const propio = balancePropio(cajaId)[moneda];
+    return ing - egr + propio;
+  };
 
-  // Balance general
-  const balanceGenARS = (ingresadosARS - egresadosARS) + (manualIngARS - manualEgrARS);
-  const balanceGenUSD = (ingresadosUSD - egresadosUSD) + (manualIngUSD - manualEgrUSD);
+  const porCobrarAuto = (moneda) =>
+    movAutomaticos.filter((m) => m.tipo === "ingreso" && m.estado === "pendiente" && m.moneda === moneda).reduce((a, m) => a + m.monto, 0);
+  const porPagarAuto = (moneda) =>
+    movAutomaticos.filter((m) => m.tipo === "egreso" && m.estado !== "pagado" && m.moneda === moneda).reduce((a, m) => a + m.monto, 0);
+  const estafasAuto = (moneda) =>
+    movAutomaticos.filter((m) => m.estado === "pendiente/estafa" && m.moneda === moneda).reduce((a, m) => a + m.monto, 0);
+
+  const crearCaja = async (e) => {
+    e.preventDefault();
+    if (!nombreNuevaCaja.trim()) return;
+    await addDoc(collection(db, "cajas"), { nombre: nombreNuevaCaja.trim(), padreId: null });
+    setNombreNuevaCaja("");
+    setMostrarFormCaja(false);
+  };
+
+  const crearSubcaja = async (e) => {
+    e.preventDefault();
+    if (!nombreNuevaSubcaja.trim() || !subcajaDe) return;
+    await addDoc(collection(db, "cajas"), { nombre: nombreNuevaSubcaja.trim(), padreId: subcajaDe });
+    setNombreNuevaSubcaja("");
+    setSubcajaDe(null);
+  };
+
+  const eliminarCaja = async (cajaId) => {
+    if (!window.confirm("¿Eliminar esta caja? Los movimientos cargados en ella no se borran, pero quedan sin caja asignada.")) return;
+    await deleteDoc(doc(db, "cajas", cajaId));
+    if (cajaSeleccionada === cajaId) setCajaSeleccionada(null);
+  };
+
+  const guardarMovimiento = async (e) => {
+    e.preventDefault();
+    if (!form.cajaId) { alert("Elegí a qué caja pertenece este movimiento"); return; }
+    const datos = { ...form, monto: Number(form.monto) };
+    if (editando) {
+      await updateDoc(doc(db, "movimientos_caja", editando), datos);
+    } else {
+      await addDoc(collection(db, "movimientos_caja"), datos);
+    }
+    setMostrarForm(false);
+    setEditando(null);
+    setForm(formVacio);
+  };
+
+  const abrirEditar = (m) => {
+    setEditando(m.id);
+    setForm({
+      tipo: m.tipo, monto: m.monto, moneda: m.moneda, medio: m.medio,
+      responsable: m.responsable, motivo: m.motivo, fecha: m.fecha, cajaId: m.cajaId || "",
+    });
+    setMostrarForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const abrirNuevoParaCaja = (cajaId) => {
+    setEditando(null);
+    setForm({ ...formVacio, cajaId });
+    setMostrarForm(true);
+  };
+
+  const cancelarForm = () => {
+    setMostrarForm(false);
+    setEditando(null);
+    setForm(formVacio);
+  };
 
   const badgeEstado = (estado) => {
     if (estado === "cobrado" || estado === "pagado") return "green";
@@ -141,21 +196,43 @@ function Caja() {
     return "amber";
   };
 
+  const cajaActual = cajaSeleccionada ? getCajaPorId(cajaSeleccionada) : null;
+  const esAuto = cajaActual?.auto;
+
   return (
     <div className="section">
       <div className="section-header">
         <h2 className="section-title">Caja</h2>
-        <button className="btn-primary" onClick={() => { cancelar(); setMostrarForm(!mostrarForm); }}>
-          {mostrarForm ? "Cancelar" : "+ Ingreso / Egreso manual"}
+        <button className="btn-primary" onClick={() => setMostrarFormCaja(!mostrarFormCaja)}>
+          {mostrarFormCaja ? "Cancelar" : "+ Nueva caja"}
         </button>
       </div>
 
-      {/* Formulario */}
+      {mostrarFormCaja && (
+        <div className="card" style={{ borderLeft: "3px solid #185FA5" }}>
+          <form onSubmit={crearCaja} style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
+            <div className="form-group" style={{ flex: 1 }}>
+              <label>Nombre de la nueva caja</label>
+              <input value={nombreNuevaCaja} onChange={(e) => setNombreNuevaCaja(e.target.value)} placeholder="Ej: Caja chica, Inversiones..." required />
+            </div>
+            <button type="submit" className="btn-primary">Crear</button>
+          </form>
+        </div>
+      )}
+
+      {/* Formulario de movimiento (se abre desde cualquier caja o desde "sin asignar") */}
       {mostrarForm && (
         <div className="card" style={{ borderLeft: "3px solid #185FA5" }}>
           <h3 className="card-title">{editando ? "Editar movimiento" : "Registrar movimiento manual"}</h3>
           <form onSubmit={guardarMovimiento}>
             <div className="form-grid">
+              <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+                <label>Caja</label>
+                <select value={form.cajaId} onChange={(e) => setForm({ ...form, cajaId: e.target.value })} required>
+                  <option value="" disabled>Elegí una caja</option>
+                  {flatCajasOptions().map((o) => (<option key={o.id} value={o.id}>{o.label}</option>))}
+                </select>
+              </div>
               <div className="form-group">
                 <label>Tipo</label>
                 <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
@@ -190,11 +267,11 @@ function Caja() {
               </div>
               <div className="form-group">
                 <label>Responsable</label>
-                <input value={form.responsable} onChange={(e) => setForm({ ...form, responsable: e.target.value })} placeholder="Nombre de quien lo hizo" required />
+                <input value={form.responsable} onChange={(e) => setForm({ ...form, responsable: e.target.value })} required />
               </div>
               <div className="form-group" style={{ gridColumn: "1 / -1" }}>
                 <label>Motivo / descripción</label>
-                <input value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} placeholder="Ej: Préstamo, inversión inicial, retiro de caja..." required />
+                <input value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })} required />
               </div>
             </div>
             <div className="total-preview">
@@ -202,255 +279,200 @@ function Caja() {
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <button type="submit" className="btn-primary">{editando ? "Guardar cambios" : "Guardar movimiento"}</button>
-              <button type="button" className="btn-secondary" onClick={cancelar}>Cancelar</button>
+              <button type="button" className="btn-secondary" onClick={cancelarForm}>Cancelar</button>
             </div>
           </form>
         </div>
       )}
 
-      {/* Alerta estafas */}
-      {(estafasARS > 0 || estafasUSD > 0) && (
-        <div className="alert alert-red">
-          🚨 Monto en estafas: {estafasARS > 0 && <strong>{fmt(estafasARS, "ARS")}</strong>} {estafasUSD > 0 && <strong>{fmt(estafasUSD, "USD")}</strong>} — no incluido en los balances
+      {/* Grilla de cajas */}
+      <div className="metrics-grid" style={{ marginBottom: "1.5rem" }}>
+        {cajasTop.map((c) => {
+          const bal = c.auto ? { [c.monedaFija]: balanceAuto(c.monedaFija) } : balanceTotal(c.id);
+          const subcajas = getSubcajas(c.id);
+          const esCustom = cajasCustom.some((cc) => cc.id === c.id);
+          return (
+            <div
+              key={c.id}
+              className="metric-card"
+              style={{ cursor: "pointer", border: cajaSeleccionada === c.id ? "1.5px solid #185FA5" : undefined }}
+              onClick={() => setCajaSeleccionada(c.id)}
+            >
+              <p className="metric-label">{c.nombre}{subcajas.length > 0 ? ` (${subcajas.length} subcajas)` : ""}</p>
+              {c.auto ? (
+                <p className="metric-value" style={{ color: bal[c.monedaFija] >= 0 ? "#1D9E75" : "#A32D2D" }}>
+                  {fmt(bal[c.monedaFija], c.monedaFija)}
+                </p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span className="metric-value" style={{ fontSize: "15px", color: bal.ARS >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(bal.ARS, "ARS")}</span>
+                  {bal.USD !== 0 && <span className="metric-value" style={{ fontSize: "15px", color: bal.USD >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(bal.USD, "USD")}</span>}
+                </div>
+              )}
+              {esCustom && (
+                <button className="btn-xs" style={{ marginTop: "6px" }} onClick={(e) => { e.stopPropagation(); eliminarCaja(c.id); }}>
+                  🗑 Eliminar
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Detalle de la caja seleccionada */}
+      {cajaActual && (
+        <div className="card" style={{ borderLeft: "3px solid #1D9E75", marginBottom: "1.5rem" }}>
+          <div className="section-header" style={{ marginBottom: "1rem" }}>
+            <h3 className="card-title" style={{ margin: 0 }}>{cajaActual.nombre}</h3>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button className="btn-secondary" onClick={() => setSubcajaDe(subcajaDe === cajaActual.id ? null : cajaActual.id)}>
+                {subcajaDe === cajaActual.id ? "Cancelar" : "+ Subcaja"}
+              </button>
+              <button className="btn-primary" onClick={() => abrirNuevoParaCaja(cajaActual.id)}>+ Movimiento</button>
+            </div>
+          </div>
+
+          {subcajaDe === cajaActual.id && (
+            <form onSubmit={crearSubcaja} style={{ display: "flex", gap: "8px", marginBottom: "1rem" }}>
+              <input value={nombreNuevaSubcaja} onChange={(e) => setNombreNuevaSubcaja(e.target.value)} placeholder="Nombre de la subcaja" required style={{ flex: 1 }} />
+              <button type="submit" className="btn-primary">Agregar</button>
+            </form>
+          )}
+
+          {getSubcajas(cajaActual.id).length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "1rem" }}>
+              {getSubcajas(cajaActual.id).map((sub) => {
+                const bal = balanceTotal(sub.id);
+                return (
+                  <div
+                    key={sub.id}
+                    onClick={() => setCajaSeleccionada(sub.id)}
+                    style={{ cursor: "pointer", padding: "8px 12px", borderRadius: "8px", border: cajaSeleccionada === sub.id ? "1.5px solid #185FA5" : "1px solid #e0dfd8", fontSize: "13px" }}
+                  >
+                    <strong>{sub.nombre}</strong>
+                    <div style={{ color: bal.ARS >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(bal.ARS, "ARS")}</div>
+                    {bal.USD !== 0 && <div style={{ color: bal.USD >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(bal.USD, "USD")}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: "1.5rem", marginBottom: "1rem", fontSize: "14px" }}>
+            {esAuto ? (
+              <span>Balance: <strong style={{ color: balanceAuto(cajaActual.monedaFija) >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceAuto(cajaActual.monedaFija), cajaActual.monedaFija)}</strong></span>
+            ) : (
+              <>
+                <span>Balance ARS: <strong style={{ color: balanceTotal(cajaActual.id).ARS >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceTotal(cajaActual.id).ARS, "ARS")}</strong></span>
+                <span>Balance USD: <strong style={{ color: balanceTotal(cajaActual.id).USD >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceTotal(cajaActual.id).USD, "USD")}</strong></span>
+              </>
+            )}
+          </div>
+
+          {esAuto && (
+            <>
+              <div className="metrics-grid" style={{ marginBottom: "1rem" }}>
+                <div className="metric-card">
+                  <p className="metric-label">Por cobrar</p>
+                  <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porCobrarAuto(cajaActual.monedaFija), cajaActual.monedaFija)}</p>
+                </div>
+                <div className="metric-card">
+                  <p className="metric-label">Por pagar</p>
+                  <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarAuto(cajaActual.monedaFija), cajaActual.monedaFija)}</p>
+                </div>
+                {estafasAuto(cajaActual.monedaFija) > 0 && (
+                  <div className="metric-card">
+                    <p className="metric-label">🚨 Estafas (no incluido)</p>
+                    <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(estafasAuto(cajaActual.monedaFija), cajaActual.monedaFija)}</p>
+                  </div>
+                )}
+              </div>
+
+              <p className="card-title" style={{ marginBottom: "8px" }}>Movimientos de ventas y compras</p>
+              <div className="table-wrap" style={{ marginBottom: "1rem" }}>
+                <table>
+                  <thead>
+                    <tr><th>Fecha</th><th>Tipo</th><th>Origen</th><th>Concepto</th><th>Responsable</th><th>Medio</th><th>Monto</th><th>Estado</th></tr>
+                  </thead>
+                  <tbody>
+                    {movAutomaticos.filter((m) => m.moneda === cajaActual.monedaFija).map((m, i) => (
+                      <tr key={i} style={m.estado === "pendiente/estafa" ? { background: "#FFF5F5" } : {}}>
+                        <td>{m.fecha}</td>
+                        <td><span className={`badge badge-${m.tipo === "ingreso" ? "green" : "red"}`}>{m.tipo}</span></td>
+                        <td><span className="badge badge-blue">{m.motivo}</span></td>
+                        <td>{m.concepto}</td>
+                        <td>{m.responsable}</td>
+                        <td>{m.medio}</td>
+                        <td>{fmt(m.monto, m.moneda)}</td>
+                        <td><span className={`badge badge-${badgeEstado(m.estado)}`}>{m.estado}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <p className="card-title" style={{ marginBottom: "8px" }}>Movimientos manuales{esAuto ? " cargados en esta caja" : ""}</p>
+          {movsManualesDeCaja(cajaActual.id).length === 0 ? (
+            <p className="empty">Sin movimientos todavía</p>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Moneda</th><th>Medio</th><th>Responsable</th><th>Motivo</th><th>Acciones</th></tr>
+                </thead>
+                <tbody>
+                  {[...movsManualesDeCaja(cajaActual.id)].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((m) => (
+                    <tr key={m.id}>
+                      <td>{m.fecha}</td>
+                      <td><span className={`badge badge-${m.tipo === "ingreso" ? "green" : "red"}`}>{m.tipo}</span></td>
+                      <td><strong>{fmt(m.monto, m.moneda)}</strong></td>
+                      <td><span className={`badge badge-${m.moneda === "USD" ? "blue" : "green"}`}>{m.moneda}</span></td>
+                      <td>{m.medio}</td>
+                      <td>{m.responsable}</td>
+                      <td>{m.motivo}</td>
+                      <td><button className="btn-xs" onClick={() => abrirEditar(m)}>✏️ Editar</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
-      {/* BALANCE GENERAL */}
-      <div className="card" style={{ borderLeft: "3px solid #1D9E75", marginBottom: "1.5rem" }}>
-        <h3 className="card-title">Balance general de caja</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-          <div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "8px", fontWeight: 500 }}>Pesos (ARS)</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Cobrado en ventas</span>
-                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(ingresadosARS, "ARS")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Pagado en compras</span>
-                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(egresadosARS, "ARS")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Ingresos manuales</span>
-                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(manualIngARS, "ARS")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Egresos manuales</span>
-                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(manualEgrARS, "ARS")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "0.5px solid #e0dfd8", paddingTop: "8px", marginTop: "4px" }}>
-                <span style={{ fontWeight: 500 }}>Balance total ARS</span>
-                <span style={{ fontSize: "18px", fontWeight: 500, color: balanceGenARS >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceGenARS, "ARS")}</span>
-              </div>
-            </div>
-          </div>
-          <div>
-            <p style={{ fontSize: "12px", color: "#888", marginBottom: "8px", fontWeight: 500 }}>Dólares (USD)</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Cobrado en ventas</span>
-                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(ingresadosUSD, "USD")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Pagado en compras</span>
-                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(egresadosUSD, "USD")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Ingresos manuales</span>
-                <span style={{ color: "#1D9E75", fontWeight: 500 }}>{fmt(manualIngUSD, "USD")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#888" }}>Egresos manuales</span>
-                <span style={{ color: "#A32D2D", fontWeight: 500 }}>− {fmt(manualEgrUSD, "USD")}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "0.5px solid #e0dfd8", paddingTop: "8px", marginTop: "4px" }}>
-                <span style={{ fontWeight: 500 }}>Balance total USD</span>
-                <span style={{ fontSize: "18px", fontWeight: 500, color: balanceGenUSD >= 0 ? "#1D9E75" : "#A32D2D" }}>{fmt(balanceGenUSD, "USD")}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {!cajaActual && <p className="empty">Hacé clic en una caja de arriba para ver el detalle, cargar movimientos y ver su balance.</p>}
 
-      {/* Métricas ARS */}
-      <p className="card-title" style={{ marginBottom: "8px" }}>Pesos (ARS) — ventas y compras</p>
-      <div className="metrics-grid" style={{ marginBottom: "1rem" }}>
-        <div className="metric-card">
-          <p className="metric-label">Cobrado</p>
-          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(ingresadosARS, "ARS")}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Pagado a proveedores</p>
-          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(egresadosARS, "ARS")}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Balance ventas/compras</p>
-          <p className="metric-value" style={{ color: ingresadosARS - egresadosARS >= 0 ? "#1D9E75" : "#A32D2D" }}>
-            {fmt(ingresadosARS - egresadosARS, "ARS")}
+      {/* Movimientos manuales viejos sin caja asignada */}
+      {sinAsignar.length > 0 && (
+        <div className="card" style={{ borderLeft: "3px solid #BA7517", marginTop: "1.5rem" }}>
+          <h3 className="card-title">⚠️ Movimientos sin caja asignada ({sinAsignar.length})</h3>
+          <p style={{ fontSize: "13px", color: "#888", marginBottom: "8px" }}>
+            Estos movimientos son de antes de este cambio. Hacé clic en "Editar" para asignarlos a una caja.
           </p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Por cobrar</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porCobrarARS, "ARS")}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Por pagar</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarARS, "ARS")}</p>
-        </div>
-      </div>
-
-      {/* Métricas USD */}
-      <p className="card-title" style={{ marginBottom: "8px" }}>Dólares (USD) — ventas y compras</p>
-      <div className="metrics-grid" style={{ marginBottom: "1.5rem" }}>
-        <div className="metric-card">
-          <p className="metric-label">Cobrado</p>
-          <p className="metric-value" style={{ color: "#1D9E75" }}>{fmt(ingresadosUSD, "USD")}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Pagado a proveedores</p>
-          <p className="metric-value" style={{ color: "#A32D2D" }}>{fmt(egresadosUSD, "USD")}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Balance ventas/compras</p>
-          <p className="metric-value" style={{ color: ingresadosUSD - egresadosUSD >= 0 ? "#1D9E75" : "#A32D2D" }}>
-            {fmt(ingresadosUSD - egresadosUSD, "USD")}
-          </p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Por cobrar</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porCobrarUSD, "USD")}</p>
-        </div>
-        <div className="metric-card">
-          <p className="metric-label">Por pagar</p>
-          <p className="metric-value" style={{ color: "#BA7517" }}>{fmt(porPagarUSD, "USD")}</p>
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div className="card">
-        <h3 className="card-title">Filtros movimientos automáticos</h3>
-        <div className="filters">
-          <div className="form-group">
-            <label>Desde</label>
-            <input type="date" value={filtros.desde} onChange={(e) => setFiltros({ ...filtros, desde: e.target.value })} />
-          </div>
-          <div className="form-group">
-            <label>Hasta</label>
-            <input type="date" value={filtros.hasta} onChange={(e) => setFiltros({ ...filtros, hasta: e.target.value })} />
-          </div>
-          <div className="form-group">
-            <label>Tipo</label>
-            <select value={filtros.tipo} onChange={(e) => setFiltros({ ...filtros, tipo: e.target.value })}>
-              <option value="">Todos</option>
-              <option value="ingreso">Solo ingresos</option>
-              <option value="egreso">Solo egresos</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label>Medio</label>
-            <select value={filtros.medio} onChange={(e) => setFiltros({ ...filtros, medio: e.target.value })}>
-              <option value="">Todos</option>
-              <option>Efectivo</option>
-              <option>Transferencia</option>
-              <option>Tarjeta crédito</option>
-              <option>Tarjeta débito</option>
-              <option>Mercado Pago</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label>Moneda</label>
-            <select value={filtros.moneda} onChange={(e) => setFiltros({ ...filtros, moneda: e.target.value })}>
-              <option value="">Todas</option>
-              <option value="ARS">Pesos (ARS)</option>
-              <option value="USD">Dólares (USD)</option>
-            </select>
-          </div>
-          <button className="btn-secondary" onClick={() => setFiltros({ desde: "", hasta: "", tipo: "", medio: "", moneda: "" })}>
-            Limpiar
-          </button>
-        </div>
-      </div>
-
-      {/* Tabla movimientos manuales */}
-      <div className="card" style={{ borderLeft: "3px solid #185FA5" }}>
-        <h3 className="card-title">Movimientos manuales de caja</h3>
-        {movManuales.length === 0 ? (
-          <p className="empty">Sin movimientos manuales todavía</p>
-        ) : (
           <div className="table-wrap">
             <table>
               <thead>
-                <tr>
-                  <th>Fecha</th><th>Tipo</th><th>Monto</th><th>Moneda</th>
-                  <th>Medio</th><th>Responsable</th><th>Motivo</th><th>Acciones</th>
-                </tr>
+                <tr><th>Fecha</th><th>Tipo</th><th>Monto</th><th>Moneda</th><th>Responsable</th><th>Motivo</th><th>Acciones</th></tr>
               </thead>
               <tbody>
-                {[...movManuales].sort((a, b) => (b.fecha || "").localeCompare(a.fecha || "")).map((m) => (
+                {sinAsignar.map((m) => (
                   <tr key={m.id}>
                     <td>{m.fecha}</td>
-                    <td>
-                      <span className={`badge badge-${m.tipo === "ingreso" ? "green" : "red"}`}>
-                        {m.tipo}
-                      </span>
-                    </td>
+                    <td><span className={`badge badge-${m.tipo === "ingreso" ? "green" : "red"}`}>{m.tipo}</span></td>
                     <td><strong>{fmt(m.monto, m.moneda)}</strong></td>
-                    <td><span className={`badge badge-${m.moneda === "USD" ? "blue" : "green"}`}>{m.moneda}</span></td>
-                    <td>{m.medio}</td>
+                    <td>{m.moneda}</td>
                     <td>{m.responsable}</td>
                     <td>{m.motivo}</td>
-                    <td>
-                      <button className="btn-xs" onClick={() => abrirEditar(m)}>✏️ Editar</button>
-                    </td>
+                    <td><button className="btn-xs" onClick={() => abrirEditar(m)}>✏️ Asignar caja</button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
-
-      {/* Tabla movimientos automáticos */}
-      <div className="card">
-        <h3 className="card-title">Movimientos de ventas y compras</h3>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th><th>Tipo</th><th>Origen</th><th>Concepto</th>
-                <th>Responsable</th><th>Medio</th><th>Moneda</th><th>Monto</th><th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movFiltrados.map((m, i) => (
-                <tr key={i} style={m.estado === "pendiente/estafa" ? { background: "#FFF5F5" } : {}}>
-                  <td>{m.fecha}</td>
-                  <td>
-                    <span className={`badge badge-${m.tipo === "ingreso" ? "green" : "red"}`}>
-                      {m.tipo}
-                    </span>
-                  </td>
-                  <td><span className="badge badge-blue">{m.motivo}</span></td>
-                  <td>{m.concepto}</td>
-                  <td>{m.responsable}</td>
-                  <td>{m.medio}</td>
-                  <td>
-                    <span className={`badge badge-${m.moneda === "USD" ? "blue" : "green"}`}>
-                      {m.moneda}
-                    </span>
-                  </td>
-                  <td>{fmt(m.monto, m.moneda)}</td>
-                  <td>
-                    <span className={`badge badge-${badgeEstado(m.estado)}`}>
-                      {m.estado}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
-      </div>
+      )}
     </div>
   );
 }
